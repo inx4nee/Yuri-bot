@@ -175,21 +175,6 @@ async def get_gemini_response(user_id, text_input, image_input=None, prompt_over
 # --- EVENTS ---
 
 @bot.event
-async def on_ready():
-    print(f'{bot.user} is online as YURI.')
-    print(f'Running on Model: {CURRENT_MODEL_NAME}')
-    
-    await setup_database()
-    
-    try:
-        synced = await bot.tree.sync()
-        print(f'Synced {len(synced)} slash commands.')
-    except Exception as e:
-        print(f"Failed to sync: {e}")
-        
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="gossip"))
-
-@bot.event
 async def on_message(message):
     if message.author == bot.user: return
 
@@ -225,7 +210,14 @@ async def on_message(message):
 
             wait_time = max(1.0, min(len(response_text) * 0.06, 12.0))
             await asyncio.sleep(wait_time)
-            await message.channel.send(response_text)
+            
+            # --- THE FIX IS HERE ---
+            # This makes the bot actually REPLY to the user's message
+            try:
+                await message.reply(response_text, mention_author=False)
+            except:
+                # Fallback if the message was deleted before she could reply
+                await message.channel.send(response_text)
 
     await bot.process_commands(message)
 
