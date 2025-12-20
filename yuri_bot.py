@@ -18,7 +18,7 @@ load_dotenv()
 # --- MODEL CONFIGURATION ---
 # UPDATED: Using the newly released Gemini 3.0 Flash (Dec 17, 2025)
 # If this string fails, try "gemini-3.0-flash-exp"
-CURRENT_MODEL_NAME = "gemini-3-flash-preview"
+CURRENT_MODEL_NAME = "gemini-2.5-flash"
 
 # Configure Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
