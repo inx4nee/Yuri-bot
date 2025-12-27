@@ -1,7 +1,7 @@
 discord.py
 python-dotenv
 google-generativeai
-Pillow
-aiohttp
 motor
 dnspython
+pillow
+groq
