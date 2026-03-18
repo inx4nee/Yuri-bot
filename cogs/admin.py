@@ -74,15 +74,15 @@ class Admin(commands.Cog):
         await self.bot.chat_collection.delete_many({})
         await ctx.send("⚠️ **SYSTEM PURGE:** I have forgotten EVERYONE. Database cleared.")
 
-    @commands.command()
+    @commands.command(name="metrics")
     @commands.is_owner()
-    async def spy(self, ctx):
+    async def get_metrics(self, ctx):
         users = await self.bot.chat_collection.distinct("user_id")
-        await ctx.send(f"🕵️ I have data on **{len(users)}** users.")
+        await ctx.send(f"📊 Database contains data on **{len(users)}** active users.")
 
-    @commands.command()
+    @commands.command(name="userlog")
     @commands.is_owner()
-    async def spysee(self, ctx, user_id: int):
+    async def get_userlog(self, ctx, user_id: int):
         cursor = self.bot.chat_collection.find({"user_id": user_id}).sort("timestamp", 1)
         log = ""
         async for doc in cursor:
@@ -90,16 +90,16 @@ class Admin(commands.Cog):
             log += f"[{doc['timestamp']}] {role}: {doc['parts'][0]}\n"
         
         if not log: return await ctx.send("No Data.")
-        await ctx.send(file=discord.File(io.BytesIO(log.encode()), filename=f"log_{user_id}.txt"))
+        await ctx.send(file=discord.File(io.BytesIO(log.encode()), filename=f"diagnostic_log_{user_id}.txt"))
 
-    @commands.command()
+    @commands.command(name="syslog")
     @commands.is_owner()
-    async def spyrecent(self, ctx):
+    async def get_syslog(self, ctx):
         now = datetime.datetime.utcnow()
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         cursor = self.bot.chat_collection.find({"timestamp": {"$gte": start}}).sort("timestamp", 1)
         
-        log = f"DAILY LOG: {start.date()}\n" + "="*40 + "\n"
+        log = f"SYSTEM DAILY LOG: {start.date()}\n" + "="*40 + "\n"
         count = 0
         async for doc in cursor:
             name = doc['user_id'] # Simplified for speed
@@ -108,7 +108,7 @@ class Admin(commands.Cog):
             count += 1
             
         if count == 0: return await ctx.send("❌ No logs today.")
-        await ctx.send(f"Found {count} messages.", file=discord.File(io.BytesIO(log.encode()), filename="daily_log.txt"))
+        await ctx.send(f"Found {count} messages.", file=discord.File(io.BytesIO(log.encode()), filename="system_daily_log.txt"))
 
     @commands.command()
     @commands.is_owner()
