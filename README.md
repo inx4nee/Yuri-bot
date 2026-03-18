@@ -81,13 +81,16 @@ pip install -r requirements.txt
 3. Environment Variables
 
 Create a .env file in the root directory and add the following required variables:
+
 DISCORD_TOKEN=your_discord_bot_token_here
 MONGO_URL=your_mongodb_connection_string
 OWNER_ID=your_personal_discord_user_id
 GEMINI_API_KEY=your_google_gemini_api_key
 GROQ_API_KEY=your_primary_groq_api_key
 
-Optional: Add backup Groq keys for automatic rotation if rate-limited
+Optional:
+
+Add backup Groq keys for automatic rotation if rate-limited
 GROQ_API_KEY_2=your_second_groq_api_key
 GROQ_API_KEY_3=your_third_groq_api_key
 
