@@ -74,7 +74,7 @@ Yuri doesn't need commands to chat! Just `@mention` her or reply to one of her m
 
 ### 2. Clone and Install
 ```bash
-git clone [https://github.com/yourusername/yuri-bot.git](https://github.com/yourusername/yuri-bot.git)
+git clone [https://github.com/Saineeee/yuri-bot.git](https://github.com/Saineeee/yuri-bot.git)
 cd yuri-bot
 pip install -r requirements.txt
 ```
