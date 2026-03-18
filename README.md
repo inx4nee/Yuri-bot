@@ -64,6 +64,33 @@ Yuri doesn't need commands to chat! Just `@mention` her or reply to one of her m
 
 ---
 
+## 📁 Project Structure
+
+```text
+yuri-bot/
+├── .gitignore               # Ignored files and environment variables
+├── main.py                  # Core bot initialization, MongoDB setup, and cog loading
+├── Procfile                 # Deployment instructions for cloud hosting (e.g., Heroku)
+├── requirements.txt         # Python dependencies
+├── runtime.txt              # Specifies Python 3.11 for deployment environments
+├── utils.py                 # Helper functions (Image stitching, Web search, Time zones)
+├── LICENSE.txt              # MIT License
+├── PRIVACY.md               # Data handling and privacy policy for Discord verification
+├── README.md                # Project documentation
+│
+├── cogs/                    # Modular command categories (Discord Cogs)
+│   ├── admin.py             # Owner-only diagnostic commands and configuration
+│   ├── ai.py                # The core Gemini/Groq AI logic, prompt defense, and auto-replies
+│   ├── general.py           # Basic commands like /help, status loops, and /feedback
+│   └── social.py            # Chaotic social commands (/roast, /ship, /crush, /confess)
+│
+└── tests/                   # Automated unit testing
+    ├── test_admin.py        # Tests for admin and health commands
+    ├── test_ai.py           # Tests for API fallbacks and prompt sanitization
+    └── test_utils.py        # Tests for image processing and web search logic
+```
+---
+
 ## 🚀 Setup & Installation
 
 ### 1. Prerequisites
