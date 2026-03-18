@@ -91,7 +91,7 @@ Optional: Add backup Groq keys for automatic rotation if rate-limited
 GROQ_API_KEY_2=your_second_groq_api_key
 GROQ_API_KEY_3=your_third_groq_api_key
 
-4. Run the Bot
+### 4. Run the Bot
 python main.py
 
 
