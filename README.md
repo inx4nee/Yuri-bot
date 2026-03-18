@@ -56,7 +56,8 @@ Yuri doesn't need commands to chat! Just `@mention` her or reply to one of her m
 * **Language:** Python 3.11
 * **Discord Library:** `discord.py`
 * **Database:** MongoDB (`motor` for async)
-* **AI APIs:** * `google-generativeai` (Gemini)
+* **AI APIs:**
+  * `google-generativeai` (Gemini)
   * `groq` (Llama 3 & Whisper)
 * **Image Processing:** `Pillow` (PIL)
 * **Web Search:** `duckduckgo-search`
@@ -76,29 +77,32 @@ Yuri doesn't need commands to chat! Just `@mention` her or reply to one of her m
 git clone [https://github.com/yourusername/yuri-bot.git](https://github.com/yourusername/yuri-bot.git)
 cd yuri-bot
 pip install -r requirements.txt
-
 ```
-3. Environment Variables
+### 3. Environment Variables
 
 Create a .env file in the root directory and add the following required variables:
-
+```
 DISCORD_TOKEN=your_discord_bot_token_here
 MONGO_URL=your_mongodb_connection_string
 OWNER_ID=your_personal_discord_user_id
 GEMINI_API_KEY=your_google_gemini_api_key
 GROQ_API_KEY=your_primary_groq_api_key
-
+```
 Optional:
 
 Add backup Groq keys for automatic rotation if rate-limited
+```
 GROQ_API_KEY_2=your_second_groq_api_key
 GROQ_API_KEY_3=your_third_groq_api_key
-
+```
 ### 4. Run the Bot
+```bash
 python main.py
-
+```
 
 __Note__: If deploying to a platform like Heroku, a Procfile is already included.
+
+---
 
 ### 🔒 Privacy
 Yuri processes message content, images, and voice notes only when explicitly mentioned or replied to. Conversational context is stored securely in MongoDB and automatically expires after 30 days. Read the full [Privacy Policy](PRIVACY_POLICY.md)
