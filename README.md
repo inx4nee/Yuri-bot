@@ -99,3 +99,6 @@ python main.py
 
 
 __Note__: If deploying to a platform like Heroku, a Procfile is already included.
+
+### 🔒 Privacy
+Yuri processes message content, images, and voice notes only when explicitly mentioned or replied to. Conversational context is stored securely in MongoDB and automatically expires after 30 days. Read the full ![Privacy Policy](PRIVACY_POLICY.md)
