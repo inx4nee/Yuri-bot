@@ -1,4 +1,4 @@
-# 🌸 Yuri (Discord Bot)
+# 🌸 Yuri
 
 ![Python Version](https://img.shields.io/badge/Python-3.11-blue)
 ![Discord.py](https://img.shields.io/badge/discord.py-v2.0+-blue)
