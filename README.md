@@ -101,7 +101,7 @@ yuri-bot/
 
 ### 2. Clone and Install
 ```bash
-git clone [https://github.com/Saineeee/yuri-bot.git](https://github.com/Saineeee/yuri-bot.git)
+git clone https://github.com/Saineeee/Yuri-bot.git
 cd yuri-bot
 pip install -r requirements.txt
 ```
@@ -131,5 +131,11 @@ __Note__: If deploying to a platform like Heroku, a Procfile is already included
 
 ---
 
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE.txt) file for details.
+
+---
+
 ### 🔒 Privacy
-Yuri processes message content, images, and voice notes only when explicitly mentioned or replied to. Conversational context is stored securely in MongoDB and automatically expires after 30 days. Read the full [Privacy Policy](PRIVACY_POLICY.md)
+Yuri processes message content, images, and voice notes only when explicitly mentioned or replied to. Conversational context is stored securely in MongoDB and automatically expires after 30 days. Read the full [PRIVACY POLICY](PRIVACY_POLICY.md)
