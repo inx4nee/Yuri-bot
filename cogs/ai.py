@@ -146,7 +146,6 @@ class AI(commands.Cog):
             HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
-        # FIX: model_1 is now 2.0 (primary), model_2 is 1.5 (fallback)
         self.model_1 = genai.GenerativeModel("gemini-2.0-flash", safety_settings=self.safety_settings, system_instruction=SYSTEM_PROMPT)
         self.model_2 = genai.GenerativeModel("gemini-1.5-flash", safety_settings=self.safety_settings, system_instruction=SYSTEM_PROMPT)
         
@@ -169,7 +168,7 @@ class AI(commands.Cog):
         self.cooldowns = {1: None, 2: None}
         self.fail_counts = {1: 0, 2: 0}
 
-        # --- TOGETHER AI SETUP (Fine-tuned Yuri model) ---
+        # --- TOGETHER AI SETUP ---
         together_key = os.getenv("TOGETHER_API_KEY")
         self.finetuned_model = os.getenv("FINETUNED_MODEL_NAME")
         if together_key and self.finetuned_model:
@@ -226,8 +225,22 @@ class AI(commands.Cog):
         grudge_prompt = "\n[SYSTEM: You hold a grudge against this user. Be cold/dismissive.]" if is_grudged else ""
 
         # 2. History & Time
-        cursor = self.bot.chat_collection.find({"user_id": user_id}).sort("timestamp", 1).limit(25)
-        history_db = [{"role": doc["role"], "parts": doc["parts"]} async for doc in cursor]
+        cursor = self.bot.chat_collection.find({"user_id": user_id}).sort("timestamp", -1).limit(20)
+        recent_docs = [doc async for doc in cursor]
+        recent_docs.reverse()  # Re-order to oldest -> newest
+
+        history_db = []
+        for doc in recent_docs:
+            role = doc.get("role")
+            if not history_db and role != "user":
+                continue  
+            if history_db and history_db[-1]["role"] == role:
+                continue  
+            history_db.append({"role": role, "parts": doc["parts"]})
+
+        # Gemini requires history to end on 'model' before we append the new 'user' message
+        if history_db and history_db[-1]["role"] == "user":
+            history_db.pop()
         
         time_str = utils.get_smart_time(text_input if text_input else "")
         system_data = f"[System: Current Date/Time is {time_str}. Do not mention this unless asked.]{grudge_prompt}"
@@ -309,6 +322,10 @@ class AI(commands.Cog):
             if img.width > 1024 or img.height > 1024:
                 img.thumbnail((1024, 1024))
 
+            # BUG 1 FIX: Convert transparent PNGs (RGBA) to standard RGB before saving to JPEG
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+
             buf = io.BytesIO()
             img.save(buf, format="JPEG")
             img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
@@ -323,7 +340,8 @@ class AI(commands.Cog):
 
         for _ in range(len(self.groq_keys) + 1):
             try:
-                model = "meta-llama/llama-4-scout-17b-16e-instruct" if img else "llama-3.3-70b-versatile"
+                # BUG 2 FIX: Use the actual Groq Vision model available on the API
+                model = "llama-3.2-11b-vision-preview" if img else "llama-3.3-70b-versatile"
                 comp = await self.groq_client.chat.completions.create(model=model, messages=messages, max_tokens=256)
                 return comp.choices[0].message.content
             except Exception as e:
@@ -361,7 +379,6 @@ class AI(commands.Cog):
         is_reply = (message.reference and message.reference.resolved and message.reference.resolved.author == self.bot.user)
         
         if self.bot.user.mentioned_in(message) or is_reply:
-            # FIX: Per-user rate limit check
             if self._is_user_on_cooldown(message.author.id):
                 return  # Silently ignore — no need to reply, just drop it
 
@@ -392,7 +409,6 @@ class AI(commands.Cog):
                         embed.set_image(url=gif_url)
                         await message.channel.send(embed=embed)
 
-            # FIX: Visible error feedback instead of silent failure
             except Exception as e:
                 print(f"on_message Error: {e}")
                 try:
@@ -426,4 +442,3 @@ class AI(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(AI(bot))
-  
