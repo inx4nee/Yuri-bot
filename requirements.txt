@@ -4,6 +4,7 @@ google-generativeai
 motor
 dnspython
 groq
+together
 duckduckgo-search
 pytz
 pillow
