@@ -42,7 +42,9 @@ class General(commands.Cog):
             value=(
                 "`/roast @user` - Absolutely destroy someone's ego.\n"
                 "`/rate @user` - I judge their vibe (0-100%).\n"
-                "`/ship @user` - Check compatibility between two people."
+                "`/ship @user` - Quick compatibility check.\n"
+                "`/compatibility @user1 @user2` - Deep compatibility based on actual messages.\n"
+                "`/summarize` - I recap the last 20 messages in this channel."
             ), 
             inline=False
         )
@@ -55,7 +57,9 @@ class General(commands.Cog):
                 "`/truth` - Get a spicy Truth question.\n"
                 "`/dare` - Get a chaotic Dare.\n"
                 "`/confess [msg]` - Send an anonymous confession.\n"
-                "`/crush @user` - Secretly match! If they pick you too, I DM both."
+                "`/crush @user` - Secretly match! If they pick you too, I DM both.\n"
+                "`/poll [question] [opt1] [opt2]` - Yuri hosts a poll and picks a side.\n"
+                "`/hotornot [description]` - Anonymous submission. Server judges you."
             ), 
             inline=False
         )
@@ -65,7 +69,8 @@ class General(commands.Cog):
             name="🧠 **BRAIN**", 
             value=(
                 "`/ask [question]` - Ask me anything (I have Internet access).\n"
-                "`/wipe` - Make me forget our conversation history."
+                "`/clearhistory` - Make me forget YOUR conversation history.\n"
+                "`/wipe` - Admin: Wipe someone else's history."
             ), 
             inline=False
         )
@@ -104,3 +109,4 @@ class General(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(General(bot))
+    
