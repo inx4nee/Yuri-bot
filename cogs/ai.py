@@ -147,7 +147,7 @@ class AI(commands.Cog):
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
         self.model_1 = genai.GenerativeModel("gemini-2.0-flash", safety_settings=self.safety_settings, system_instruction=SYSTEM_PROMPT)
-        self.model_2 = genai.GenerativeModel("gemini-1.5-flash", safety_settings=self.safety_settings, system_instruction=SYSTEM_PROMPT)
+        self.model_2 = genai.GenerativeModel("gemini-1.5-flash-8b", safety_settings=self.safety_settings, system_instruction=SYSTEM_PROMPT)
         
         # --- GROQ MULTI-KEY SETUP ---
         self.groq_keys = []
@@ -168,7 +168,7 @@ class AI(commands.Cog):
         self.cooldowns = {1: None, 2: None}
         self.fail_counts = {1: 0, 2: 0}
 
-        # --- TOGETHER AI SETUP ---
+        # --- TOGETHER AI SETUP (Fine-tuned Yuri model) ---
         together_key = os.getenv("TOGETHER_API_KEY")
         self.finetuned_model = os.getenv("FINETUNED_MODEL_NAME")
         if together_key and self.finetuned_model:
@@ -233,9 +233,9 @@ class AI(commands.Cog):
         for doc in recent_docs:
             role = doc.get("role")
             if not history_db and role != "user":
-                continue  
+                continue  # Gemini history MUST start with 'user'
             if history_db and history_db[-1]["role"] == role:
-                continue  
+                continue  # Skip consecutive duplicate roles to prevent 400 Bad Request
             history_db.append({"role": role, "parts": doc["parts"]})
 
         # Gemini requires history to end on 'model' before we append the new 'user' message
@@ -322,7 +322,7 @@ class AI(commands.Cog):
             if img.width > 1024 or img.height > 1024:
                 img.thumbnail((1024, 1024))
 
-            # BUG 1 FIX: Convert transparent PNGs (RGBA) to standard RGB before saving to JPEG
+            # BUG FIX: Convert transparent PNGs (RGBA) to standard RGB before saving to JPEG
             if img.mode != 'RGB':
                 img = img.convert('RGB')
 
@@ -340,8 +340,8 @@ class AI(commands.Cog):
 
         for _ in range(len(self.groq_keys) + 1):
             try:
-                # BUG 2 FIX: Use the actual Groq Vision model available on the API
-                model = "llama-3.2-11b-vision-preview" if img else "llama-3.3-70b-versatile"
+                # BUG FIX: Reverted back to your original Llama 4 Scout model!
+                model = "meta-llama/llama-4-scout-17b-16e-instruct" if img else "llama-3.3-70b-versatile"
                 comp = await self.groq_client.chat.completions.create(model=model, messages=messages, max_tokens=256)
                 return comp.choices[0].message.content
             except Exception as e:
@@ -405,14 +405,14 @@ class AI(commands.Cog):
 
                     await utils.send_chunked_reply(message, resp_text, mention_user=True)
                     if gif_url:
-                        embed = discord.Embed(color=discord.Color.from_rgb(255, 105, 180))
+                        embed = discord.Embed(color=discord.Color.fromrgb(255, 105, 180))
                         embed.set_image(url=gif_url)
                         await message.channel.send(embed=embed)
 
             except Exception as e:
                 print(f"on_message Error: {e}")
                 try:
-                    await message.reply("something broke rn try again 💀")
+                    await message.reply("something broke rn try again")
                 except Exception:
                     pass
 
