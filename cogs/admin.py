@@ -110,17 +110,19 @@ class Admin(commands.Cog):
     @commands.is_owner()
     async def wipe_all(self, ctx):
         await self.bot.chat_collection.delete_many({})
-        await ctx.send("⚠️ **SYSTEM PURGE:** I have forgotten EVERYONE. Database cleared.")
+        await ctx.send("⚠️ **SYSTEM PURGE:** I have forgotten EVERYONE. Db cleared.")
 
-    @commands.command()
+    @commands.command(name="usercount")
     @commands.is_owner()
-    async def spy(self, ctx):
+    async def user_count(self, ctx):
+        """Owner only: Shows how many unique users are in the database."""
         users = await self.bot.chat_collection.distinct("user_id")
-        await ctx.send(f"🕵️ I have data on **{len(users)}** users.")
+        await ctx.send(f"📊 Database contains context data for **{len(users)}** users.")
 
-    @commands.command()
+    @commands.command(name="fetchlog")
     @commands.is_owner()
-    async def spysee(self, ctx, user_id: int):
+    async def fetch_log(self, ctx, user_id: int):
+        """Owner only: Fetches a user's chat history for debugging context."""
         cursor = self.bot.chat_collection.find({"user_id": user_id}).sort("timestamp", 1)
         log = ""
         async for doc in cursor:
@@ -128,25 +130,26 @@ class Admin(commands.Cog):
             log += f"[{doc['timestamp']}] {role}: {doc['parts'][0]}\n"
         
         if not log: return await ctx.send("No Data.")
-        await ctx.send(file=discord.File(io.BytesIO(log.encode()), filename=f"log_{user_id}.txt"))
+        await ctx.send(file=discord.File(io.BytesIO(log.encode()), filename=f"debug_log_{user_id}.txt"))
 
-    @commands.command()
+    @commands.command(name="dailylog")
     @commands.is_owner()
-    async def spyrecent(self, ctx):
+    async def daily_log(self, ctx):
+        """Owner only: Shows recent bot interactions to monitor for errors or usage spikes."""
         now = datetime.datetime.utcnow()
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         cursor = self.bot.chat_collection.find({"timestamp": {"$gte": start}}).sort("timestamp", 1)
         
-        log = f"DAILY LOG: {start.date()}\n" + "="*40 + "\n"
+        log = f"DAILY DIAGNOSTIC LOG: {start.date()}\n" + "="*40 + "\n"
         count = 0
         async for doc in cursor:
-            name = doc['user_id'] # Simplified for speed
+            name = doc['user_id']
             msg = str(doc['parts'][0]).replace('\n', ' ')
             log += f"[{doc['timestamp'].strftime('%H:%M')}] {name}: {msg[:50]}\n"
             count += 1
             
         if count == 0: return await ctx.send("❌ No logs today.")
-        await ctx.send(f"Found {count} messages.", file=discord.File(io.BytesIO(log.encode()), filename="daily_log.txt"))
+        await ctx.send(f"Found {count} messages.", file=discord.File(io.BytesIO(log.encode()), filename="daily_diagnostic_log.txt"))
 
     @commands.command()
     @commands.is_owner()
@@ -176,7 +179,7 @@ class Admin(commands.Cog):
             embed = discord.Embed(
                 title="📬 Response from Developer",
                 description=message,
-                color=discord.Color.from_rgb(255, 105, 180) # Yuri Pink
+                color=discord.Color.from_rgb(255, 105, 180)
             )
             embed.set_footer(text=f"Don't reply to this message, if there's anything else then pls use /feedback once again")
             
