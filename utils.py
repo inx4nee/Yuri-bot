@@ -169,3 +169,4 @@ async def get_user_history_text(collection, user_id, limit=15):
             messages.append(sanitize_for_prompt(content))
     if not messages: return "No recent chat history found."
     return "\n".join([f"- {m}" for m in reversed(messages)])
+    
