@@ -68,21 +68,59 @@ class Admin(commands.Cog):
         await self.bot.chat_collection.delete_many({"user_id": member.id})
         await interaction.followup.send(f"✅ Wiped memory for {member.display_name}.")
 
+    @app_commands.command(name="clearhistory", description="Wipe your own chat history with Yuri.")
+    async def clearhistory(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        result = await self.bot.chat_collection.delete_many({"user_id": interaction.user.id})
+        if result.deleted_count == 0:
+            await interaction.followup.send("i literally don't remember anything about you already 💀")
+        else:
+            await interaction.followup.send("✅ done. who are you again? i forgor 🫠")
+
+    @commands.command(name="stats")
+    @commands.is_owner()
+    async def stats(self, ctx):
+        """Owner only: shows bot stats across all servers."""
+        total_messages = await self.bot.chat_collection.count_documents({})
+        total_users = len(await self.bot.chat_collection.distinct("user_id"))
+        total_servers = len(self.bot.guilds)
+        total_grudges = await self.bot.grudge_collection.count_documents({})
+        total_crushes = await self.bot.crush_collection.count_documents({})
+        total_feedback = await self.bot.feedback_collection.count_documents({})
+
+        # Today's activity
+        today_start = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        todays_messages = await self.bot.chat_collection.count_documents({"timestamp": {"$gte": today_start}})
+
+        msg = (
+            f"**📊 YURI STATS**\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🌐 **Servers:** {total_servers}\n"
+            f"👥 **Unique Users:** {total_users}\n"
+            f"💬 **Total Messages:** {total_messages:,}\n"
+            f"📅 **Messages Today:** {todays_messages:,}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"💀 **Active Grudges:** {total_grudges}\n"
+            f"💖 **Pending Crushes:** {total_crushes}\n"
+            f"📬 **Feedback Items:** {total_feedback}\n"
+        )
+        await ctx.send(msg)
+
     @commands.command(name="wipeall")
     @commands.is_owner()
     async def wipe_all(self, ctx):
         await self.bot.chat_collection.delete_many({})
         await ctx.send("⚠️ **SYSTEM PURGE:** I have forgotten EVERYONE. Database cleared.")
 
-    @commands.command(name="metrics")
+    @commands.command()
     @commands.is_owner()
-    async def get_metrics(self, ctx):
+    async def spy(self, ctx):
         users = await self.bot.chat_collection.distinct("user_id")
-        await ctx.send(f"📊 Database contains data on **{len(users)}** active users.")
+        await ctx.send(f"🕵️ I have data on **{len(users)}** users.")
 
-    @commands.command(name="userlog")
+    @commands.command()
     @commands.is_owner()
-    async def get_userlog(self, ctx, user_id: int):
+    async def spysee(self, ctx, user_id: int):
         cursor = self.bot.chat_collection.find({"user_id": user_id}).sort("timestamp", 1)
         log = ""
         async for doc in cursor:
@@ -90,16 +128,16 @@ class Admin(commands.Cog):
             log += f"[{doc['timestamp']}] {role}: {doc['parts'][0]}\n"
         
         if not log: return await ctx.send("No Data.")
-        await ctx.send(file=discord.File(io.BytesIO(log.encode()), filename=f"diagnostic_log_{user_id}.txt"))
+        await ctx.send(file=discord.File(io.BytesIO(log.encode()), filename=f"log_{user_id}.txt"))
 
-    @commands.command(name="syslog")
+    @commands.command()
     @commands.is_owner()
-    async def get_syslog(self, ctx):
+    async def spyrecent(self, ctx):
         now = datetime.datetime.utcnow()
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         cursor = self.bot.chat_collection.find({"timestamp": {"$gte": start}}).sort("timestamp", 1)
         
-        log = f"SYSTEM DAILY LOG: {start.date()}\n" + "="*40 + "\n"
+        log = f"DAILY LOG: {start.date()}\n" + "="*40 + "\n"
         count = 0
         async for doc in cursor:
             name = doc['user_id'] # Simplified for speed
@@ -108,7 +146,7 @@ class Admin(commands.Cog):
             count += 1
             
         if count == 0: return await ctx.send("❌ No logs today.")
-        await ctx.send(f"Found {count} messages.", file=discord.File(io.BytesIO(log.encode()), filename="system_daily_log.txt"))
+        await ctx.send(f"Found {count} messages.", file=discord.File(io.BytesIO(log.encode()), filename="daily_log.txt"))
 
     @commands.command()
     @commands.is_owner()
@@ -152,3 +190,4 @@ class Admin(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Admin(bot))
+                                               
