@@ -1,6 +1,6 @@
 # Privacy Policy for Yuri (Discord Bot)
 
-**Last Updated:** March 19, 2026
+**Last Updated:** March 20, 2026
 
 This Privacy Policy explains how Yuri ("the Bot") collects, uses, stores, and protects your data when you interact with it on Discord. By using the Bot or adding it to your server, you consent to the practices described below.
 
@@ -34,11 +34,12 @@ Because Yuri is an AI bot, your inputs (messages, images, audio) are securely tr
 * **DuckDuckGo:** For performing web searches based on your queries to provide up-to-date context.
 
 ## 5. Data Deletion and User Rights
-You have the right to request the immediate deletion of your data from our database. 
+You have complete control over your conversational data and the right to delete it at any time. 
 
-* **How to request deletion:** You can submit a deletion request directly through the Bot by using the `/feedback` command, which logs your request for review. Alternatively, you can contact the developer directly.
-* Once requested, your data will be manually purged using the admin `/wipe` command, instantly erasing your conversational memory from the database.
+* **Instant Self-Deletion:** You can instantly and permanently delete your entire chat history with Yuri by using the `/clearhistory` command in any server where the bot is present. This immediately purges your conversational records from our database.
+* **Manual Requests:** If you encounter any issues, or if you wish to request the manual deletion of other data (such as bug reports or matchmaking data), you can submit a request directly to the developer using the `/feedback` command.
 
 ## 6. Contact Information
-If you have any questions or concerns about this Privacy Policy, or if you wish to request manual data deletion, please contact the developer via Discord:
-* **Discord Username:** sainneee
+If you have any questions or concerns about this Privacy Policy, need assistance with data deletion, or want to report a bug, please use the **`/feedback`** command within any server where Yuri is present. 
+
+This command securely routes your message and User ID directly to the developer's private inbox for review and response.
