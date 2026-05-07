@@ -1,6 +1,3 @@
-# cogs/social.py
-# All fixes applied — see inline comments prefixed FIX for each change.
-
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -22,17 +19,13 @@ class Social(commands.Cog):
     async def get_ai_cog(self):
         return self.bot.get_cog("AI")
 
-    # ── /roast ────────────────────────────────────────────────────────────────
+    # --- /roast ---
 
     @app_commands.command(name="roast", description="DESTROY someone based on history.")
     async def roast(self, interaction: discord.Interaction, member: discord.Member) -> None:
-        # FIX (MEDIUM): DM guard.
-        # /roast takes a discord.Member which is guild-only, but Discord doesn't
-        # always block slash commands in DMs cleanly. Explicit guard prevents a
-        # cryptic AttributeError if guild-related lookups are added later.
         if not interaction.guild:
             await interaction.response.send_message(
-                "this only works in a server 💀", ephemeral=True
+                "this only works in a server", ephemeral=True
             )
             return
 
@@ -57,11 +50,11 @@ class Social(commands.Cog):
         )
         await utils.send_chunked_reply(interaction, f"{member.mention} {resp}")
 
-    # ── /rate ─────────────────────────────────────────────────────────────────
+    # --- /rate ---
 
     @app_commands.command(name="rate", description="Judge vibe based on chat history.")
     async def rate(self, interaction: discord.Interaction, member: discord.Member) -> None:
-        # FIX (MEDIUM): DM guard.
+        # DM guard.
         if not interaction.guild:
             await interaction.response.send_message(
                 "this only works in a server 💀", ephemeral=True
@@ -89,7 +82,7 @@ class Social(commands.Cog):
         )
         await utils.send_chunked_reply(interaction, f"{member.mention} {resp}")
 
-    # ── /ship ─────────────────────────────────────────────────────────────────
+    # --- /ship ---
 
     @app_commands.command(name="ship", description="Check compatibility.")
     async def ship(
@@ -98,9 +91,7 @@ class Social(commands.Cog):
         member1: discord.Member,
         member2: Optional[discord.Member] = None,
     ) -> None:
-        # FIX (MEDIUM): DM guard.
-        # channel.history() on a DM channel works but produces no guild-member
-        # data and makes the dossier lookups meaningless. Block early.
+        # DM guard.
         if not interaction.guild:
             await interaction.response.send_message(
                 "ship people in a server, not in dms 💀", ephemeral=True
@@ -120,12 +111,6 @@ class Social(commands.Cog):
         h1 = await utils.get_user_history_text(self.bot.chat_collection, member1.id, limit=30)
         h2 = await utils.get_user_history_text(self.bot.chat_collection, target2.id, limit=30)
 
-        # FIX (HIGH): channel.history() now uses the timeout-guarded helper.
-        # Previously a bare async-for on channel.history(limit=100) with no
-        # timeout could run for several seconds in large servers, causing the
-        # deferred interaction to expire and the user to see "This interaction
-        # failed". fetch_channel_messages hard-caps at 8 seconds and returns
-        # whatever was collected so the command always completes.
         raw_msgs = await utils.fetch_channel_messages(
             interaction.channel, fetch_limit=100, keep_limit=20
         )
@@ -164,15 +149,11 @@ class Social(commands.Cog):
         embed.set_footer(text="based on actual message history and interactions")
         await interaction.followup.send(embed=embed)
 
-    # ── /confess ──────────────────────────────────────────────────────────────
+    # --- /confess ---
 
     @app_commands.command(name="confess", description="Send an anonymous confession.")
     async def confess(self, interaction: discord.Interaction, message: str) -> None:
-        # FIX (MEDIUM): DM guard.
-        # guild_id is None in a DM. The config lookup uses guild_id as the filter
-        # key so the query would silently return nothing and the user would receive
-        # the "admin must run /setup first" error even when setup is done. Block DMs
-        # at the start so the error message is meaningful.
+        # DM guard.
         if not interaction.guild:
             await interaction.response.send_message(
                 "confessions go in a server, not in my dms 💀", ephemeral=True
@@ -201,14 +182,11 @@ class Social(commands.Cog):
         await channel.send(embed=embed)
         await interaction.followup.send("✅ Sent!", ephemeral=True)
 
-    # ── /crush ────────────────────────────────────────────────────────────────
+    # --- /crush ---
 
     @app_commands.command(name="crush", description="Secretly match with your crush!")
     async def crush(self, interaction: discord.Interaction, target: discord.Member) -> None:
-        # FIX (MEDIUM): DM guard.
-        # The @everyone match announcement uses interaction.channel.send(), which
-        # works in DMs, but sending @everyone to a DM channel is meaningless and
-        # the guild-wide announcement is the whole point of the feature.
+        # DM guard.
         if not interaction.guild:
             await interaction.response.send_message(
                 "this only works in a server 💀", ephemeral=True
@@ -250,7 +228,7 @@ class Social(commands.Cog):
             )
             await interaction.followup.send("🤫 **Secret Kept.**", ephemeral=True)
 
-    # ── /truth ────────────────────────────────────────────────────────────────
+    # --- /truth ---
 
     @app_commands.command(name="truth", description="Get a spicy Truth question.")
     async def truth(self, interaction: discord.Interaction) -> None:
@@ -263,7 +241,7 @@ class Social(commands.Cog):
         )
         await utils.send_chunked_reply(interaction, f"**TRUTH:** {resp}")
 
-    # ── /dare ─────────────────────────────────────────────────────────────────
+    # --- /dare ---
 
     @app_commands.command(name="dare", description="Get a chaotic Dare.")
     async def dare(self, interaction: discord.Interaction) -> None:
@@ -276,7 +254,7 @@ class Social(commands.Cog):
         )
         await utils.send_chunked_reply(interaction, f"**DARE:** {resp}")
 
-    # ── /poll ─────────────────────────────────────────────────────────────────
+    # --- /poll ---
 
     @app_commands.command(name="poll", description="Yuri hosts a drama-style poll and picks a side.")
     async def poll(
@@ -286,10 +264,7 @@ class Social(commands.Cog):
         option1:  str,
         option2:  str,
     ) -> None:
-        # FIX (MEDIUM): DM guard.
-        # The poll message is sent via interaction.followup.send() which works in
-        # DMs, but reactions on a DM message cannot receive the emoji votes that
-        # make the poll functional, so the feature is meaningless there.
+        # DM guard.
         if not interaction.guild:
             await interaction.response.send_message(
                 "polls only work in a server 💀", ephemeral=True
@@ -325,16 +300,14 @@ class Social(commands.Cog):
         await poll_msg.add_reaction("🅰️")
         await poll_msg.add_reaction("🅱️")
 
-    # ── /hotornot ─────────────────────────────────────────────────────────────
+    # --- /hotornot ---
 
     @app_commands.command(
         name="hotornot",
         description="Submit an anonymous description and let the server judge you.",
     )
     async def hotornot(self, interaction: discord.Interaction, description: str) -> None:
-        # FIX (MEDIUM): DM guard.
-        # /hotornot reads guild config for the confession channel and posts an
-        # @everyone-visible embed. Neither is meaningful in a DM.
+        # DM guard.
         if not interaction.guild:
             await interaction.response.send_message(
                 "this only works in a server 💀", ephemeral=True
@@ -377,8 +350,6 @@ class Social(commands.Cog):
             "✅ submitted anonymously. good luck bestie 💀", ephemeral=True
         )
 
-        # Verdict runs in a background task — interaction handler returns immediately.
-        # (asyncio.sleep(900) was previously here, blocking the coroutine for 15 min.)
         self.bot.loop.create_task(
             self._deliver_hotornot_verdict(
                 channel=channel,
@@ -433,17 +404,14 @@ class Social(commands.Cog):
         )
         await channel.send(embed=result_embed)
 
-    # ── /summarize ────────────────────────────────────────────────────────────
+    # --- /summarize ---
 
     @app_commands.command(
         name="summarize",
         description="Yuri summarizes the last 20 messages in this channel.",
     )
     async def summarize(self, interaction: discord.Interaction) -> None:
-        # FIX (MEDIUM): DM guard.
-        # /summarize technically works in DMs but the summary would only ever
-        # contain the user's own messages with no server context, which is
-        # pointless. Block it and keep the feature server-only.
+        # DM guard.
         if not interaction.guild:
             await interaction.response.send_message(
                 "summarize a server chat bestie, not our dms 💀", ephemeral=True
@@ -452,7 +420,6 @@ class Social(commands.Cog):
 
         await interaction.response.defer()
 
-        # FIX (HIGH): Replaced raw channel.history() with timeout-guarded helper.
         messages = await utils.fetch_channel_messages(
             interaction.channel, fetch_limit=30, keep_limit=20
         )
@@ -481,7 +448,7 @@ class Social(commands.Cog):
         embed.set_footer(text="based on the last 20 messages")
         await interaction.followup.send(embed=embed)
 
-    # ── /compatibility ────────────────────────────────────────────────────────
+    # --- /compatibility ---
 
     @app_commands.command(
         name="compatibility",
@@ -493,8 +460,7 @@ class Social(commands.Cog):
         member1: discord.Member,
         member2: Optional[discord.Member] = None,
     ) -> None:
-        # FIX (MEDIUM): DM guard.
-        # Takes discord.Member params (guild-only) and reads channel history.
+        # DM guard.
         if not interaction.guild:
             await interaction.response.send_message(
                 "this only works in a server 💀", ephemeral=True
@@ -513,8 +479,7 @@ class Social(commands.Cog):
         d2 = utils.get_user_dossier(target2)
         h1 = await utils.get_user_history_text(self.bot.chat_collection, member1.id, limit=30)
         h2 = await utils.get_user_history_text(self.bot.chat_collection, target2.id, limit=30)
-
-        # FIX (HIGH): Replaced raw channel.history() with timeout-guarded helper.
+        
         raw_msgs = await utils.fetch_channel_messages(
             interaction.channel, fetch_limit=100, keep_limit=20
         )
