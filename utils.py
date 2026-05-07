@@ -80,7 +80,6 @@ async def get_image_from_url(url: str) -> Optional[Image.Image]:
 
     Returns a PIL Image on success, None if the download fails, the URL
     returns a non-200 status, or the payload exceeds MAX_IMAGE_BYTES.
-    Uses MAX_IMAGE_BYTES constant — was hardcoded 8*1024*1024 before.
     """
     try:
         async with aiohttp.ClientSession() as session:
@@ -112,7 +111,6 @@ def stitch_images(img1_data: Image.Image, img2_data: Image.Image) -> Optional[Im
     """Combine two PIL images side-by-side at a standard height of 512 px.
 
     Returns the stitched PIL Image, or None on any error.
-    Uses MAX_IMAGE_PIXELS constant — was hardcoded 5000*5000 before.
     """
     try:
         Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
@@ -226,7 +224,6 @@ async def process_gif_tags(text: str) -> tuple[str, Optional[str]]:
     return text, gif_url
 
 
-# --- FIX (HIGH): channel.history() timeout helper ---
 async def fetch_channel_messages(
     channel: discord.abc.Messageable,
     *,
@@ -277,7 +274,6 @@ async def send_chunked_reply(
 
     *destination* may be a discord.Message (uses .reply on the first chunk),
     a discord.Interaction (uses .followup.send), or any object with .send().
-    Uses CHUNK_SIZE constant — was hardcoded 1900 before.
     """
     if not text:
         return
@@ -336,21 +332,28 @@ async def get_user_history_text(
     *,
     limit: int = 15,
 ) -> str:
-    """Fetch recent user messages from MongoDB and format them for a prompt.
+    """Fetch recent conversation from MongoDB and format it for an AI prompt.
+
+    Fetches BOTH user messages and Yuri's replies so social commands like
+    /roast, /rate, /ship, and /compatibility can see the full relationship
+    dynamic — not just what the user said, but how Yuri responded to them.
+    Each line is labelled "User:" or "Yuri:" for clarity.
 
     Returns a bullet-list string, or a fallback message if no history exists.
     """
     cursor = (
         collection
-        .find({"user_id": user_id, "role": "user"}, {"parts": 1, "_id": 0})
+        .find({"user_id": user_id}, {"parts": 1, "role": 1, "_id": 0})
         .sort("timestamp", -1)
         .limit(limit)
     )
     messages: list[str] = []
     async for doc in cursor:
         content = doc.get("parts", [""])[0]
+        role    = doc.get("role", "user")
+        label   = "Yuri" if role == "model" else "User"
         if isinstance(content, str) and len(content) < 200:
-            messages.append(sanitize_for_prompt(content))
+            messages.append(f"{label}: {sanitize_for_prompt(content)}")
 
     if not messages:
         return "No recent chat history found."
