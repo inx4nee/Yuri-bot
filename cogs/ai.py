@@ -23,7 +23,7 @@ except ImportError:
 
 import utils
 
-from prompts import SYSTEM_PROMPT
+from cogs.prompts import SYSTEM_PROMPT
 
 log = logging.getLogger(__name__)
 
