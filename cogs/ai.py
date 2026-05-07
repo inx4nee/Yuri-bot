@@ -1,6 +1,3 @@
-# cogs/ai.py
-# All fixes applied — see inline comments prefixed with FIX for each change.
-
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -17,11 +14,6 @@ import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from groq import AsyncGroq
 
-# ── FIX (HIGH): Guard the `together` import ─────────────────────────────────
-# Previously a bare top-level import crashed the entire bot at startup if the
-# package was missing from the environment. Now the bot starts normally and
-# only activates the Together fallback when both the package AND the required
-# env vars are present.
 try:
     from together import AsyncTogether
     _TOGETHER_AVAILABLE = True
@@ -31,24 +23,10 @@ except ImportError:
 
 import utils
 
-# ── FIX (MEDIUM): Extract SYSTEM_PROMPT to prompts.py ───────────────────────
-# Previously ~150 lines of prompt text lived in this file, making both the
-# prompt and the cog logic harder to read, test, and version independently.
-# The prompt now lives in prompts.py and is imported here — a one-line change
-# to update the prompt no longer requires touching AI logic at all.
 from prompts import SYSTEM_PROMPT
 
-# ── Module-level logger ──────────────────────────────────────────────────────
-# FIX (HIGH): Replace all print() calls with structured logging.
-# print() output is invisible to log aggregators (Datadog, Railway, etc.) and
-# provides no severity level, timestamp, or module context. Using the standard
-# logging module means all output is captured by whatever handler main.py
-# configures, works correctly in production, and can be filtered by level.
 log = logging.getLogger(__name__)
 
-# ── FIX (LOW): Named constants — no more magic numbers scattered in the code ─
-# Every tunable number lives here so the meaning is clear and there is a single
-# place to change values without hunting through method bodies.
 USER_COOLDOWN_SECS   = 3     # minimum seconds between responses to the same user
 GUILD_COOLDOWN_SECS  = 1     # minimum seconds between responses in the same server
 MAX_INPUT_CHARS      = 2000  # hard cap on incoming message length
@@ -56,11 +34,6 @@ MAX_HISTORY_MESSAGES = 20    # conversation turns loaded from MongoDB per reques
 MAX_GROQ_TOKENS      = 256   # max tokens for all Groq completions
 MIN_SEARCH_LENGTH    = 15    # messages shorter than this never trigger a web search
 
-# ── FIX (CRITICAL): Compile search-trigger regex once at module level ────────
-# Previously a plain word list ("who", "what", "where" ...) matched inside
-# almost any English sentence and triggered a DuckDuckGo search on nearly
-# every message. This regex requires word-boundary-anchored intent phrases
-# so casual messages like "how are you" or "what's up" are correctly ignored.
 _SEARCH_TRIGGER_RE = re.compile(
     r'\b('
     r'who is|who are|who was|who were|'
@@ -81,7 +54,7 @@ class AI(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-        # ── Gemini setup ─────────────────────────────────────────────────────
+        # --- Gemini setup ---
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         self.safety_settings = {
             HarmCategory.HARM_CATEGORY_HARASSMENT:        HarmBlockThreshold.BLOCK_NONE,
@@ -100,7 +73,7 @@ class AI(commands.Cog):
             system_instruction=SYSTEM_PROMPT,
         )
 
-        # ── Groq multi-key setup ──────────────────────────────────────────────
+        # --- Groq multi-key setup ---
         self.groq_keys: list[str] = []
         if os.getenv("GROQ_API_KEY"):
             self.groq_keys.append(os.getenv("GROQ_API_KEY"))  # type: ignore[arg-type]
@@ -121,7 +94,7 @@ class AI(commands.Cog):
         self.cooldowns:   dict[int, Optional[datetime.datetime]] = {1: None, 2: None}
         self.fail_counts: dict[int, int]                         = {1: 0,    2: 0}
 
-        # ── Together AI setup (fine-tuned Yuri model) ─────────────────────────
+        # --- Together AI setup (fine-tuned Yuri model) ---
         together_key = os.getenv("TOGETHER_API_KEY")
         self.finetuned_model: Optional[str] = os.getenv("FINETUNED_MODEL_NAME")
         if _TOGETHER_AVAILABLE and together_key and self.finetuned_model:
@@ -135,17 +108,10 @@ class AI(commands.Cog):
                     "Run: pip install together"
                 )
 
-        # ── FIX (HIGH): Per-user and per-guild rate-limit caches ─────────────
-        # Only a per-user 3-second window existed before. A server with 50+
-        # active users could send simultaneous mentions, creating a request
-        # burst large enough to exhaust Gemini's per-minute quota and trigger
-        # the 24-hour cooldown penalty for the entire bot.
-        # The guild bucket (1 req/sec/server) is an outer guard; the user
-        # bucket stays as-is. DM messages skip the guild check entirely.
         self._user_cooldowns:  dict[int, datetime.datetime] = {}
         self._guild_cooldowns: dict[int, datetime.datetime] = {}
 
-    # ── Private helpers ───────────────────────────────────────────────────────
+    # --- Private helpers ---
 
     def _advance_groq_key(self) -> None:
         """FIX (MEDIUM): Proactive round-robin rotation before each fallback call.
@@ -192,7 +158,7 @@ class AI(commands.Cog):
         self._guild_cooldowns[guild_id] = now + datetime.timedelta(seconds=GUILD_COOLDOWN_SECS)
         return False
 
-    # ── Audio ─────────────────────────────────────────────────────────────────
+    # --- Audio ---
 
     async def transcribe_audio(self, file_bytes: bytes, filename: str) -> Optional[str]:
         """Transcribe audio via Groq Whisper. Rotates keys on failure."""
@@ -212,7 +178,7 @@ class AI(commands.Cog):
                     break
         return None
 
-    # ── Core AI ───────────────────────────────────────────────────────────────
+    # --- Core AI ---
 
     async def get_combined_response(
         self,
@@ -235,7 +201,6 @@ class AI(commands.Cog):
         )
 
         # 2. Build conversation history from MongoDB
-        # FIX (LOW): Uses MAX_HISTORY_MESSAGES constant — was hardcoded 20.
         cursor = (
             self.bot.chat_collection.find({"user_id": user_id})
             .sort("timestamp", -1)
@@ -244,9 +209,6 @@ class AI(commands.Cog):
         recent_docs = [doc async for doc in cursor]
         recent_docs.reverse()
 
-        # FIX (CRITICAL): Merge consecutive same-role messages instead of dropping them.
-        # When two user docs appeared back-to-back the old code silently discarded the
-        # second one, creating invisible holes in the conversation context.
         history_db: list[dict] = []
         for doc in recent_docs:
             role = doc.get("role")
@@ -268,7 +230,6 @@ class AI(commands.Cog):
         )
 
         # 4. Conditional web search
-        # FIX (CRITICAL): Regex with word-boundary anchors, not a single-word list.
         search_data = ""
         if (
             text_input
@@ -294,7 +255,7 @@ class AI(commands.Cog):
             if image_input:
                 current_text += " (User sent an image. Roast it or comment on it.)"
 
-        # 6. Gemini generation loop — tries model_1 then model_2
+        # 6. Gemini generation loop - tries model_1 then model_2
         response_text = ""
         successful    = False
         now           = datetime.datetime.now()
@@ -364,7 +325,7 @@ class AI(commands.Cog):
         if not self.groq_client:
             return "server dead rn. try again later 💀"
 
-        # Proactive round-robin — always start on a fresh key
+        # Proactive round-robin - always start on a fresh key
         self._advance_groq_key()
 
         messages: list[dict] = [{"role": "system", "content": sys_prompt}]
@@ -391,7 +352,6 @@ class AI(commands.Cog):
         else:
             messages.append({"role": "user", "content": msg})
 
-        # FIX (LOW): Uses MAX_GROQ_TOKENS constant — was hardcoded literal 256.
         for _ in range(len(self.groq_keys) + 1):
             try:
                 model = (
@@ -438,7 +398,7 @@ class AI(commands.Cog):
 
         return "the ai is down rn, wait like 12 hours (rate limits) 💀"
 
-    # ── Events ────────────────────────────────────────────────────────────────
+    # --- Events ---
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -453,11 +413,11 @@ class AI(commands.Cog):
         if not (self.bot.user.mentioned_in(message) or is_reply):
             return
 
-        # Per-user cooldown checked first (cheapest)
+        # Per-user cooldown checked first
         if self._is_user_on_cooldown(message.author.id):
             return
 
-        # Per-guild cooldown — DMs have no guild so skip the check there
+        # Per-guild cooldown - DMs have no guild so skip the check there
         if message.guild and self._is_guild_on_cooldown(message.guild.id):
             return
 
@@ -482,11 +442,6 @@ class AI(commands.Cog):
                 if not final_text.strip() and not img_data:
                     return
 
-                # FIX (HIGH): Hard cap on input length.
-                # No upper bound existed before — a malicious user could paste a
-                # 100 000-character block, silently blowing out token budgets.
-                # 2000 chars matches Discord's own per-message limit so normal
-                # users typing will never hit this ceiling.
                 if len(final_text) > MAX_INPUT_CHARS:
                     await message.reply(
                         f"that message is way too long bestie 💀 "
@@ -511,14 +466,11 @@ class AI(commands.Cog):
             except Exception:
                 pass
 
-    # ── Slash commands ────────────────────────────────────────────────────────
+    # --- Slash commands ---
 
     @app_commands.command(name="ask", description="Ask Yuri a Yes/No question.")
     async def ask(self, interaction: discord.Interaction, question: str) -> None:
-        # FIX (MEDIUM): DM guard.
-        # Without this check, /ask in a DM reaches guild-dependent logic in
-        # get_combined_response (owner check, grudge lookup) with
-        # interaction.guild == None, causing silent misbehaviour.
+        # DM guard.
         if not interaction.guild:
             await interaction.response.send_message(
                 "use this in a server bestie, not in my dms 💀", ephemeral=True
@@ -536,12 +488,10 @@ class AI(commands.Cog):
 
     @app_commands.command(name="rename", description="Give someone a chaotic nickname.")
     async def rename(self, interaction: discord.Interaction, member: discord.Member) -> None:
-        # FIX (MEDIUM): DM guard.
-        # /rename calls interaction.guild.me.top_role and member.edit(nick=...) —
-        # both raise AttributeError when interaction.guild is None (DM context).
+        # DM guard
         if not interaction.guild:
             await interaction.response.send_message(
-                "this only works in a server 💀", ephemeral=True
+                "this only works in a server", ephemeral=True
             )
             return
 
