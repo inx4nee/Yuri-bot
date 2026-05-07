@@ -69,24 +69,25 @@ Yuri doesn't need commands to chat! Just `@mention` her or reply to one of her m
 ```text
 yuri-bot/
 ├── .gitignore               # Ignored files and environment variables
-├── main.py                  # Core bot initialization, MongoDB setup, and cog loading
+├── main.py                  # Core bot initialisation, MongoDB setup, and cog loading
+├── prompts.py               # Yuri's system prompt (extracted for independent versioning)
+├── utils.py                 # Helper functions (image, search, sanitisation, time)
 ├── Procfile                 # Deployment instructions for cloud hosting (e.g., Heroku)
 ├── requirements.txt         # Python dependencies
 ├── runtime.txt              # Specifies Python 3.11 for deployment environments
-├── utils.py                 # Helper functions (Image stitching, Web search, Time zones)
 ├── LICENSE.txt              # MIT License
-├── PRIVACY.md               # Data handling and privacy policy for Discord verification
+├── PRIVACY_POLICY.md        # Data handling and privacy policy for Discord verification
 ├── README.md                # Project documentation
 │
 ├── cogs/                    # Modular command categories (Discord Cogs)
 │   ├── admin.py             # Owner-only diagnostic commands and configuration
-│   ├── ai.py                # The core Gemini/Groq AI logic, prompt defense, and auto-replies
+│   ├── ai.py                # Core Gemini/Groq/Together AI logic, prompt defence, auto-replies
 │   ├── general.py           # Basic commands like /help, status loops, and /feedback
 │   └── social.py            # Chaotic social commands (/roast, /ship, /crush, /confess)
 │
 └── tests/                   # Automated unit testing
     ├── test_admin.py        # Tests for admin and health commands
-    ├── test_ai.py           # Tests for API fallbacks and prompt sanitization
+    ├── test_ai.py           # Tests for API fallbacks and prompt sanitisation
     └── test_utils.py        # Tests for image processing and web search logic
 ```
 ---
