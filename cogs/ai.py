@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 USER_COOLDOWN_SECS   = 3     # minimum seconds between responses to the same user
 GUILD_COOLDOWN_SECS  = 1     # minimum seconds between responses in the same server
 MAX_INPUT_CHARS      = 2000  # hard cap on incoming message length
-MAX_HISTORY_MESSAGES = 20    # conversation turns loaded from MongoDB per request
+MAX_HISTORY_MESSAGES = 40    # conversation turns loaded from MongoDB per request
 MAX_GROQ_TOKENS      = 256   # max tokens for all Groq completions
 MIN_SEARCH_LENGTH    = 15    # messages shorter than this never trigger a web search
 
