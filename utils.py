@@ -1,6 +1,3 @@
-# utils.py
-# All fixes applied — see inline comments prefixed FIX for each change.
-
 import io
 import re
 import logging
@@ -15,51 +12,27 @@ from PIL import Image
 from duckduckgo_search import DDGS
 import discord
 
-# ── Module-level logger ───────────────────────────────────────────────────────
-# FIX (HIGH): Every print() in this file is replaced with structured logging.
-# print() is invisible to log aggregators and carries no severity or context.
-# Callers configure the root logger once in main.py; all modules inherit it.
+# --- Module-level logger ---
 log = logging.getLogger(__name__)
 
-# ── FIX (LOW): Named constants — no magic numbers in function bodies ──────────
-# Previously 8*1024*1024, 5000*5000, and 1900 appeared as bare literals.
-# Naming them here makes the intent clear and gives a single place to tune them.
 MAX_IMAGE_BYTES  = 8 * 1024 * 1024   # 8 MB — download size cap for images
 MAX_IMAGE_PIXELS = 5_000 * 5_000     # decompression bomb guard (25 MP)
 CHUNK_SIZE       = 1_900             # Discord message length limit with headroom
 
 
-# ── FIX (MEDIUM): Strengthened sanitize_for_prompt ───────────────────────────
-# The old implementation only escaped ASCII square brackets ( [ → \[ ] → \] ).
-# This left three bypass routes open:
-#   1. Unicode lookalike brackets: 【SYSTEM】〔PROMPT〕 — visually identical,
-#      not caught by the old bracket-escape.
-#   2. XML-style tags: <system> <prompt> — zero mitigation before.
-#   3. Natural-language injection: "ignore previous instructions" — no detection.
-#
-# Fix strategy (applied in this order so each step builds on the previous):
-#   Step 1 — normalise Unicode bracket lookalikes to their ASCII equivalents
-#             so the pattern check in step 2 can catch them.
-#   Step 2 — scan for known injection patterns on the normalised text and
-#             replace the entire message with a safe sentinel if found.
-#   Step 3 — escape all remaining [ ] < > so they cannot form new tags after
-#             the sanitised string is interpolated into the prompt.
-
-# Characters that are visually indistinguishable from ASCII brackets but sit
-# outside the range the old code escaped.  Mapping: lookalike → ASCII equivalent.
 _UNICODE_BRACKET_TABLE = str.maketrans({
-    "\u3010": "[",   # 【
-    "\u3011": "]",   # 】
-    "\u3014": "[",   # 〔
-    "\u3015": "]",   # 〕
-    "\u300A": "<",   # 《
-    "\u300B": ">",   # 》
-    "\u300C": "[",   # 「
-    "\u300D": "]",   # 」
-    "\uFF3B": "[",   # ［ (fullwidth)
-    "\uFF3D": "]",   # ］ (fullwidth)
-    "\uFF1C": "<",   # ＜ (fullwidth)
-    "\uFF1E": ">",   # ＞ (fullwidth)
+    "\u3010": "[",   # [
+    "\u3011": "]",   # ]
+    "\u3014": "[",   # [
+    "\u3015": "]",   # ]
+    "\u300A": "<",   # <
+    "\u300B": ">",   # >
+    "\u300C": "[",   # [
+    "\u300D": "]",   # ]
+    "\uFF3B": "[",   # [ (fullwidth)
+    "\uFF3D": "]",   # ] (fullwidth)
+    "\uFF1C": "<",   # < (fullwidth)
+    "\uFF1E": ">",   # > (fullwidth)
 })
 
 # Patterns that are only sent by someone trying to manipulate the model,
@@ -85,10 +58,10 @@ def sanitize_for_prompt(text: str) -> str:
 
     text = str(text)
 
-    # Step 1: normalise Unicode lookalikes → ASCII so pattern matching works
+    # Step 1: normalise Unicode lookalikes - ASCII so pattern matching works
     text = text.translate(_UNICODE_BRACKET_TABLE)
 
-    # Step 2: detect injection before escaping (escaping could mask the pattern)
+    # Step 2: detect injection before escaping
     if _INJECTION_RE.search(text):
         log.warning("Prompt injection attempt detected and blocked.")
         return "[message removed: injection attempt detected]"
@@ -100,7 +73,7 @@ def sanitize_for_prompt(text: str) -> str:
     return text
 
 
-# ── Image helpers ─────────────────────────────────────────────────────────────
+# --- Image helpers ---
 
 async def get_image_from_url(url: str) -> Optional[Image.Image]:
     """Download an image from *url* with a hard size cap.
@@ -142,10 +115,9 @@ def stitch_images(img1_data: Image.Image, img2_data: Image.Image) -> Optional[Im
     Uses MAX_IMAGE_PIXELS constant — was hardcoded 5000*5000 before.
     """
     try:
-        # FIX (LOW): Use constant instead of bare literal
         Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
-        # Decompression bomb guard — reject suspiciously large source images
+        # Decompression bomb guard - reject suspiciously large source images
         if (
             img1_data.width > 5_000 or img1_data.height > 5_000
             or img2_data.width > 5_000 or img2_data.height > 5_000
@@ -173,13 +145,13 @@ def stitch_images(img1_data: Image.Image, img2_data: Image.Image) -> Optional[Im
         return None
 
 
-# ── Time & search helpers ─────────────────────────────────────────────────────
+# --- Time & search helpers ---
 
 def get_smart_time(text_input: str) -> str:
     """Return a localised time string inferred from the language of *text_input*."""
     utc_now = datetime.datetime.now(pytz.utc)
 
-    # Hindi / Hinglish / Bengali script or common Hinglish words → IST
+    # Hindi / Hinglish / Bengali script or common Hinglish words -> IST
     if (
         re.search(r"[\u0900-\u097F]", text_input)   # Devanagari
         or re.search(r"[\u0980-\u09FF]", text_input) # Bengali
@@ -191,12 +163,12 @@ def get_smart_time(text_input: str) -> str:
         local = utc_now.astimezone(pytz.timezone("Asia/Kolkata"))
         return f"{local.strftime('%I:%M %p')} (IST)"
 
-    # Japanese script → JST
+    # Japanese script -> JST
     if re.search(r"[\u3040-\u309F\u30A0-\u30FF]", text_input):
         local = utc_now.astimezone(pytz.timezone("Asia/Tokyo"))
         return f"{local.strftime('%I:%M %p')} (JST)"
 
-    # Default → IST with full date
+    # Default -> IST with full date
     local = utc_now.astimezone(pytz.timezone("Asia/Kolkata"))
     return f"{local.strftime('%A, %B %d, %I:%M %p')} (IST)"
 
@@ -254,18 +226,7 @@ async def process_gif_tags(text: str) -> tuple[str, Optional[str]]:
     return text, gif_url
 
 
-# ── FIX (HIGH): channel.history() timeout helper ─────────────────────────────
-# Previously every social command that needed recent channel messages used a
-# bare `async for msg in channel.history(limit=100)` with no timeout guard.
-# In large active servers this loop can take many seconds, easily exceeding
-# Discord's 3-second response window for deferred interactions and causing
-# silent failures or "This interaction failed" errors to users.
-#
-# Fix: centralise all channel-history reads through this helper, which wraps
-# the loop in asyncio.timeout (Python 3.11+, matching runtime.txt). If the
-# read hasn't finished within *timeout_secs* seconds, the loop is cancelled
-# and whatever messages were collected so far are returned — the command still
-# works, just with a shorter window of context.
+# --- FIX (HIGH): channel.history() timeout helper ---
 async def fetch_channel_messages(
     channel: discord.abc.Messageable,
     *,
@@ -300,11 +261,11 @@ async def fetch_channel_messages(
         log.warning("fetch_channel_messages error in channel %s: %s",
                     getattr(channel, "id", "?"), e)
 
-    messages.reverse()  # chronological order: oldest → newest
+    messages.reverse()  # chronological order: oldest -> newest
     return messages
 
 
-# ── Discord helpers ───────────────────────────────────────────────────────────
+# --- Discord helpers ---
 
 async def send_chunked_reply(
     destination,
