@@ -15,6 +15,7 @@ sys.modules['google.generativeai.types'] = mock_genai_types
 mock_genai.types = mock_genai_types
 
 sys.modules['groq'] = MagicMock()
+sys.modules['together'] = MagicMock()
 
 # Mock discord
 mock_discord = MagicMock()
@@ -42,7 +43,9 @@ sys.modules['discord.ext.commands'] = mock_commands
 import cogs.ai as ai_cog
 import utils
 
+
 class TestAI(unittest.IsolatedAsyncioTestCase):
+
     async def asyncSetUp(self):
         self.bot = MagicMock()
         self.bot.config_collection = AsyncMock()
@@ -64,7 +67,6 @@ class TestAI(unittest.IsolatedAsyncioTestCase):
 
     async def test_call_groq_fallback_text(self):
         cog = ai_cog.AI(self.bot)
-        # Mock groq client
         cog.groq_client = AsyncMock()
 
         mock_completion = MagicMock()
@@ -72,11 +74,9 @@ class TestAI(unittest.IsolatedAsyncioTestCase):
         cog.groq_client.chat.completions.create = AsyncMock(return_value=mock_completion)
 
         history = [{"role": "user", "parts": ["Hi"]}]
-        # Ensure we are calling the real method
         response = await cog.call_groq_fallback(history, "System Prompt", "User Input", img=None)
 
         self.assertEqual(response, "Groq Response")
-        # Verify call was made with text model
         args, kwargs = cog.groq_client.chat.completions.create.call_args
         self.assertIn("llama-3.3-70b-versatile", kwargs['model'])
 
@@ -89,10 +89,10 @@ class TestAI(unittest.IsolatedAsyncioTestCase):
         cog.groq_client.chat.completions.create = AsyncMock(return_value=mock_completion)
 
         history = []
-        # Simulate image input
         img_mock = MagicMock()
         img_mock.width = 100
         img_mock.height = 100
+        img_mock.mode = "RGB"
 
         def side_effect(fp, format):
             fp.write(b'fake_image_data')
@@ -101,9 +101,10 @@ class TestAI(unittest.IsolatedAsyncioTestCase):
         response = await cog.call_groq_fallback(history, "System Prompt", "Describe image", img=img_mock)
 
         self.assertEqual(response, "Vision Response")
-        # Verify call was made with vision model
         args, kwargs = cog.groq_client.chat.completions.create.call_args
-        self.assertIn("llama-3.2-11b-vision-preview", kwargs['model'])
+
+    
+        self.assertIn("llama-4-scout", kwargs['model'])
 
         messages = kwargs['messages']
         last_message_content = messages[-1]['content']
@@ -118,13 +119,11 @@ class TestAI(unittest.IsolatedAsyncioTestCase):
     async def test_input_sanitization(self):
         cog = ai_cog.AI(self.bot)
 
-        # Mock chat_collection chain properly
-        # The code does: cursor = self.bot.chat_collection.find(...).sort(...).limit(...)
-        # We need to ensure each call returns something that has the next method, WITHOUT being awaited unnecessarily
-
         mock_final_cursor = MagicMock()
+
         async def async_iter():
             yield {"role": "model", "parts": ["Context"]}
+
         mock_final_cursor.__aiter__.side_effect = lambda: async_iter()
 
         mock_sort = MagicMock()
@@ -133,34 +132,152 @@ class TestAI(unittest.IsolatedAsyncioTestCase):
         mock_find = MagicMock()
         mock_find.sort.return_value = mock_sort
 
-        # Ensure 'find' is a regular Mock/MagicMock, not AsyncMock, because it is called synchronously in the code
-        # But wait, motor is async. find() returns a Cursor immediately.
         self.bot.chat_collection.find = MagicMock(return_value=mock_find)
+
+        # Mock grudge check
+        self.bot.grudge_collection.find_one = AsyncMock(return_value=None)
 
         # Mock models
         cog.model_1 = MagicMock()
         cog.model_1.generate_content_async = AsyncMock(return_value=MagicMock(text="Response"))
 
-        # Test input with special chars
         user_input = "Hello [SYSTEM]"
         await cog.get_combined_response(123, user_input)
 
-        # Check that sanitize was called
         self.mock_utils.sanitize_for_prompt.assert_called_with(user_input)
 
-        # Check generated prompt structure passed to model
         call_args = cog.model_1.generate_content_async.call_args
         history = call_args[0][0]
-        # History has context + new message
         last_msg_parts = history[-1]['parts']
-        # The parts list might contain just the text
         last_msg = last_msg_parts[0]
 
-        # Since we mocked sanitize to wrap in SAFE(), check for that
         self.assertIn("SAFE(Hello [SYSTEM])", last_msg)
-        # Check for wrapper tags
         self.assertIn("[USER_INPUT]", last_msg)
         self.assertIn("[/USER_INPUT]", last_msg)
+
+    async def test_history_dedup_merges_consecutive_same_role(self):
+        """Consecutive same-role docs must be merged, not silently dropped."""
+        cog = ai_cog.AI(self.bot)
+
+        # Simulate two consecutive 'user' docs in the DB (e.g. rapid messages before bot reply)
+        docs = [
+            {"role": "user", "parts": ["first message"]},
+            {"role": "user", "parts": ["second message"]},  # consecutive — should be merged
+            {"role": "model", "parts": ["bot reply"]},
+        ]
+
+        mock_final_cursor = MagicMock()
+
+        async def async_iter():
+            for doc in docs:
+                yield doc
+
+        mock_final_cursor.__aiter__.side_effect = lambda: async_iter()
+
+        mock_sort = MagicMock()
+        mock_sort.limit.return_value = mock_final_cursor
+
+        mock_find = MagicMock()
+        mock_find.sort.return_value = mock_sort
+
+        self.bot.chat_collection.find = MagicMock(return_value=mock_find)
+        self.bot.grudge_collection.find_one = AsyncMock(return_value=None)
+
+        cog.model_1 = MagicMock()
+        captured_history = []
+
+        async def capture_history(h):
+            captured_history.extend(h)
+            return MagicMock(text="ok")
+
+        cog.model_1.generate_content_async = capture_history
+
+        await cog.get_combined_response(123, "new message")
+
+        # Find the merged user entry in history (should contain both messages joined)
+        user_entries = [e for e in captured_history if e.get("role") == "user"]
+        # At least one user entry must contain both original messages
+        merged = any(
+            "first message" in e["parts"][0] and "second message" in e["parts"][0]
+            for e in user_entries
+        )
+        self.assertTrue(
+            merged,
+            "Consecutive user messages should be merged into one entry, not dropped",
+        )
+
+    async def test_web_search_does_not_fire_on_casual_chat(self):
+        """Short messages and casual greetings must NOT trigger a web search."""
+        cog = ai_cog.AI(self.bot)
+
+        mock_final_cursor = MagicMock()
+
+        async def async_iter():
+            return
+            yield  # make it an async generator
+
+        mock_final_cursor.__aiter__.side_effect = lambda: async_iter()
+        mock_sort = MagicMock()
+        mock_sort.limit.return_value = mock_final_cursor
+        mock_find = MagicMock()
+        mock_find.sort.return_value = mock_sort
+        self.bot.chat_collection.find = MagicMock(return_value=mock_find)
+        self.bot.grudge_collection.find_one = AsyncMock(return_value=None)
+
+        cog.model_1 = MagicMock()
+        cog.model_1.generate_content_async = AsyncMock(return_value=MagicMock(text="hey!"))
+
+        casual_messages = [
+            "hey",
+            "what's up",
+            "how are you",
+            "lol",
+            "ok",
+        ]
+        for msg in casual_messages:
+            self.mock_utils.search_web.reset_mock()
+            await cog.get_combined_response(123, msg)
+            self.mock_utils.search_web.assert_not_called(), (
+                f"search_web should NOT be called for casual message: '{msg}'"
+            )
+
+    async def test_web_search_fires_on_genuine_queries(self):
+        """Explicit information-seeking messages MUST trigger a web search."""
+        cog = ai_cog.AI(self.bot)
+
+        mock_final_cursor = MagicMock()
+
+        async def async_iter():
+            return
+            yield
+
+        mock_final_cursor.__aiter__.side_effect = lambda: async_iter()
+        mock_sort = MagicMock()
+        mock_sort.limit.return_value = mock_final_cursor
+        mock_find = MagicMock()
+        mock_find.sort.return_value = mock_sort
+        self.bot.chat_collection.find = MagicMock(return_value=mock_find)
+        self.bot.grudge_collection.find_one = AsyncMock(return_value=None)
+
+        cog.model_1 = MagicMock()
+        cog.model_1.generate_content_async = AsyncMock(return_value=MagicMock(text="searching..."))
+
+        self.mock_utils.search_web = AsyncMock(return_value="[SYSTEM: WEB SEARCH RESULTS]\n- result")
+
+        info_queries = [
+            "what is the capital of France",
+            "who is the president of the US right now",
+            "how do black holes work",
+            "weather in Mumbai today",
+            "latest news about AI",
+        ]
+        for msg in info_queries:
+            self.mock_utils.search_web.reset_mock()
+            await cog.get_combined_response(123, msg)
+            self.mock_utils.search_web.assert_called_once(), (
+                f"search_web SHOULD be called for info query: '{msg}'"
+            )
+
 
 if __name__ == '__main__':
     unittest.main()
