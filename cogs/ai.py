@@ -496,4 +496,13 @@ class AI(commands.Cog):
             None,
             prompt_override=f"Reply with ONLY a funny/mean nickname for {safe_name}. Max 2 words.",
         )
-        n
+        new_nick = raw.replace('"', "").strip()[:32]
+        try:
+            await member.edit(nick=new_nick)
+            await interaction.followup.send(f"You are now **{new_nick}** ✨")
+        except discord.Forbidden:
+            await interaction.followup.send(f"I chose **{new_nick}**, but Discord blocked me.")
+
+
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(AI(bot))
