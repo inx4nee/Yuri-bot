@@ -6,6 +6,7 @@ import os
 import io
 import re
 import logging
+import asyncio
 import datetime
 import base64
 from typing import Optional
@@ -136,6 +137,18 @@ class AI(commands.Cog):
         self._guild_cooldowns[guild_id] = now + datetime.timedelta(seconds=GUILD_COOLDOWN_SECS)
         return False
 
+    async def _safe_typing_task(self, channel: discord.abc.Messageable):
+        """Runs the typing indicator safely in the background."""
+        try:
+            async with channel.typing():
+                # Blocks infinitely until this task is explicitly cancelled by the main thread
+                await asyncio.Event().wait() 
+        except asyncio.CancelledError:
+            pass # Normal exit when AI finishes generating
+        except Exception:
+            # Silently ignore 429 Too Many Requests or Forbidden errors
+            pass
+
     # --- Audio ---
 
     async def transcribe_audio(self, file_bytes: bytes, filename: str) -> Optional[str]:
@@ -222,7 +235,6 @@ class AI(commands.Cog):
             if image_input:
                 current_text += " (User sent an image. Roast it or comment on it.)"
 
-        # --- New Gemini Generation Logic ---
         response_text = ""
         successful    = False
         now           = datetime.datetime.now()
@@ -231,7 +243,6 @@ class AI(commands.Cog):
             if self.cooldowns[layer] and now > self.cooldowns[layer]:
                 self.cooldowns[layer] = None
 
-        # Build contents explicitly using the new SDK types
         gemini_history = []
         for m in history_db:
             gemini_history.append(
@@ -396,36 +407,42 @@ class AI(commands.Cog):
             return
 
         try:
-            # Removed async with message.channel.typing() here to prevent rate limit crashes
-            user_id    = message.author.id
-            clean_text = message.content.replace(f"<@{self.bot.user.id}>", "").strip()
-            img_data   = None
-            voice_text = ""
+            # Start the typing indicator as an independent background task
+            typing_task = asyncio.create_task(self._safe_typing_task(message.channel))
+            
+            try:
+                user_id    = message.author.id
+                clean_text = message.content.replace(f"<@{self.bot.user.id}>", "").strip()
+                img_data   = None
+                voice_text = ""
 
-            for att in message.attachments:
-                fname = att.filename.lower()
-                if not img_data and any(fname.endswith(x) for x in ["png", "jpg", "jpeg", "webp"]):
-                    img_data = await utils.get_image_from_url(att.url)
-                elif not voice_text and any(fname.endswith(x) for x in ["ogg", "mp3", "wav", "m4a"]):
-                    file_bytes  = await att.read()
-                    transcribed = await self.transcribe_audio(file_bytes, fname)
-                    if transcribed:
-                        voice_text = f'\n[User Voice Note]: "{transcribed}"'
+                for att in message.attachments:
+                    fname = att.filename.lower()
+                    if not img_data and any(fname.endswith(x) for x in ["png", "jpg", "jpeg", "webp"]):
+                        img_data = await utils.get_image_from_url(att.url)
+                    elif not voice_text and any(fname.endswith(x) for x in ["ogg", "mp3", "wav", "m4a"]):
+                        file_bytes  = await att.read()
+                        transcribed = await self.transcribe_audio(file_bytes, fname)
+                        if transcribed:
+                            voice_text = f'\n[User Voice Note]: "{transcribed}"'
 
-            final_text = clean_text + voice_text
-            if not final_text.strip() and not img_data:
-                return
+                final_text = clean_text + voice_text
+                if not final_text.strip() and not img_data:
+                    return
 
-            if len(final_text) > MAX_INPUT_CHARS:
-                await message.reply(
-                    f"that message is way too long bestie 💀 "
-                    f"keep it under {MAX_INPUT_CHARS} chars"
+                if len(final_text) > MAX_INPUT_CHARS:
+                    await message.reply(
+                        f"that message is way too long bestie 💀 "
+                        f"keep it under {MAX_INPUT_CHARS} chars"
+                    )
+                    return
+
+                resp_text, gif_url = await self.get_combined_response(
+                    user_id, final_text, img_data
                 )
-                return
-
-            resp_text, gif_url = await self.get_combined_response(
-                user_id, final_text, img_data
-            )
+            finally:
+                # Guarantee the typing indicator stops when AI is done processing
+                typing_task.cancel()
 
             await utils.send_chunked_reply(message, resp_text, mention_user=True)
             if gif_url:
@@ -479,13 +496,4 @@ class AI(commands.Cog):
             None,
             prompt_override=f"Reply with ONLY a funny/mean nickname for {safe_name}. Max 2 words.",
         )
-        new_nick = raw.replace('"', "").strip()[:32]
-        try:
-            await member.edit(nick=new_nick)
-            await interaction.followup.send(f"You are now **{new_nick}** ✨")
-        except discord.Forbidden:
-            await interaction.followup.send(f"I chose **{new_nick}**, but Discord blocked me.")
-
-
-async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(AI(bot))
+        n
