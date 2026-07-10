@@ -7,6 +7,11 @@ from unittest.mock import MagicMock, patch, AsyncMock
 # Add root directory to path to import utils
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# Delete any cached cog modules from earlier test files so they re-import
+# against our mocks below.
+for _mod in ('cogs.ai', 'cogs.tools', 'cogs.memory', 'cogs.prompts'):
+    sys.modules.pop(_mod, None)
+
 # Mock modules for the new SDK
 mock_google = MagicMock()
 mock_genai = MagicMock()
@@ -70,6 +75,7 @@ class TestAI(unittest.IsolatedAsyncioTestCase):
     async def test_call_groq_fallback_text(self):
         cog = ai_cog.AI(self.bot)
         cog.groq_client = AsyncMock()
+        cog.groq_keys = ["key1"]  # single key — _cycle_groq_key is a no-op
 
         mock_completion = MagicMock()
         mock_completion.choices = [MagicMock(message=MagicMock(content="Groq Response"))]
@@ -85,6 +91,7 @@ class TestAI(unittest.IsolatedAsyncioTestCase):
     async def test_call_groq_fallback_vision(self):
         cog = ai_cog.AI(self.bot)
         cog.groq_client = AsyncMock()
+        cog.groq_keys = ["key1"]  # single key — _cycle_groq_key is a no-op
 
         mock_completion = MagicMock()
         mock_completion.choices = [MagicMock(message=MagicMock(content="Vision Response"))]
@@ -139,22 +146,20 @@ class TestAI(unittest.IsolatedAsyncioTestCase):
         user_input = "Hello [SYSTEM]"
         await cog.get_combined_response(123, user_input)
 
+        # sanitize_for_prompt must have been called with the raw user input
         self.mock_utils.sanitize_for_prompt.assert_called_with(user_input)
 
-        call_args = cog.gemini_client.aio.models.generate_content.call_args
-        history = call_args[1]['contents']
-        # The last content is the user's new message
-        last_msg_content = history[-1]
-        
-        # We need to extract the text being sent, which is in the parts array
-        # Our mock setup creates a dummy Part, but in actual code it's `types.Part.from_text()`
-        # Let's stringify it to search for the sanitised pattern since the mock `types.Part` 
-        # structure might not exactly mimic the deeply nested dict.
-        last_msg_str = str(last_msg_content)
+        # Capture every text passed to types.Part.from_text(...) and assert the
+        # user-input wrapper + sanitized payload made it through.
+        from_text_calls = [
+            (c.args[0] if c.args else c.kwargs.get('text', ''))
+            for c in ai_cog.types.Part.from_text.call_args_list
+        ]
+        joined = "\n".join(from_text_calls)
 
-        self.assertIn("SAFE(Hello [SYSTEM])", last_msg_str)
-        self.assertIn("[USER_INPUT]", last_msg_str)
-        self.assertIn("[/USER_INPUT]", last_msg_str)
+        self.assertIn("[USER_INPUT]", joined)
+        self.assertIn("[/USER_INPUT]", joined)
+        self.assertIn("SAFE(Hello [SYSTEM])", joined)
 
     async def test_history_dedup_merges_consecutive_same_role(self):
         cog = ai_cog.AI(self.bot)
@@ -179,23 +184,23 @@ class TestAI(unittest.IsolatedAsyncioTestCase):
         self.bot.grudge_collection.find_one = AsyncMock(return_value=None)
 
         cog.gemini_client = MagicMock()
-        captured_history = []
-
-        async def capture_history(*args, **kwargs):
-            captured_history.extend(kwargs.get('contents', []))
-            return MagicMock(text="ok")
-
-        cog.gemini_client.aio.models.generate_content = capture_history
+        cog.gemini_client.aio.models.generate_content = AsyncMock(return_value=MagicMock(text="ok"))
 
         await cog.get_combined_response(123, "new message")
 
-        # Convert to string to easily check merged content
-        captured_str = str(captured_history)
-        
-        merged = "first message" in captured_str and "second message" in captured_str
+        # Capture every text passed to types.Part.from_text(...). Consecutive
+        # same-role messages should be merged into one Part, so 'first message'
+        # and 'second message' should appear together in a single call's text.
+        from_text_calls = [
+            (c.args[0] if c.args else c.kwargs.get('text', ''))
+            for c in ai_cog.types.Part.from_text.call_args_list
+        ]
+        # Find the call that contains both — proves they were merged, not dropped
+        merged = any("first message" in t and "second message" in t for t in from_text_calls)
         self.assertTrue(
             merged,
-            "Consecutive user messages should be merged into one entry, not dropped",
+            "Consecutive user messages should be merged into one entry, not dropped. "
+            f"Captured calls: {from_text_calls}",
         )
 
     async def test_web_search_does_not_fire_on_casual_chat(self):
@@ -227,9 +232,10 @@ class TestAI(unittest.IsolatedAsyncioTestCase):
         for msg in casual_messages:
             self.mock_utils.search_web.reset_mock()
             await cog.get_combined_response(123, msg)
-            self.mock_utils.search_web.assert_not_called(), (
-                f"search_web should NOT be called for casual message: '{msg}'"
-            )
+            self.mock_utils.search_web.assert_not_called()
+            # NOTE: do NOT use the comma-with-message form here — it silently
+            # builds a tuple and discards the message. assert_not_called() has
+            # no message arg anyway.
 
     async def test_web_search_fires_on_genuine_queries(self):
         cog = ai_cog.AI(self.bot)

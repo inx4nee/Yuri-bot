@@ -18,6 +18,42 @@ log = logging.getLogger(__name__)
 MAX_IMAGE_BYTES  = 8 * 1024 * 1024   # 8 MB — download size cap for images
 MAX_IMAGE_PIXELS = 5_000 * 5_000     # decompression bomb guard (25 MP)
 CHUNK_SIZE       = 1_900             # Discord message length limit with headroom
+HISTORY_MSG_MAX  = 400               # truncate (don't drop) long messages in history recap
+
+# --- UTC helper (Py 3.12+ deprecates datetime.utcnow()) ---
+UTC = datetime.timezone.utc
+
+
+def utcnow() -> datetime.datetime:
+    """Timezone-aware UTC now. Use everywhere instead of datetime.utcnow()."""
+    return datetime.datetime.now(UTC)
+
+
+# --- Shared aiohttp session (reused across all HTTP calls) ---
+_session: Optional[aiohttp.ClientSession] = None
+
+
+def get_session() -> aiohttp.ClientSession:
+    """Return a process-wide shared aiohttp ClientSession.
+
+    Created lazily on first use. Caller must NOT close it — closed automatically
+    on bot shutdown via close_session().
+    """
+    global _session
+    if _session is None or _session.closed:
+        _session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30),
+            headers={"User-Agent": "YuriBot/1.0"},
+        )
+    return _session
+
+
+async def close_session() -> None:
+    """Close the shared aiohttp session. Call on bot shutdown."""
+    global _session
+    if _session is not None and not _session.closed:
+        await _session.close()
+    _session = None
 
 
 _UNICODE_BRACKET_TABLE = str.maketrans({
@@ -45,6 +81,42 @@ _INJECTION_RE = re.compile(
     r"\bignore\s+(previous|all|your)\s+instructions?\b",   # natural-language reset
     re.IGNORECASE,
 )
+
+
+# Matches Discord mentions that can ping: @everyone, @here, user/role/channel pings.
+# We break the @ symbol with a zero-width space so Discord won't render them as pings.
+_MENTION_RE = re.compile(
+    r"@(everyone|here)\b"                       # @everyone / @here
+    r"|"
+    r"<@!?\d+>"                                # <@123> / <@!123>  (user)
+    r"|"
+    r"<@&\d+>"                                 # <@&123>           (role)
+    r"|"
+    r"<#\d+>"                                  # <#123>            (channel)
+)
+
+
+def sanitize_for_discord(text: str) -> str:
+    """Make *text* safe to embed in a Discord message or embed.
+
+    Neutralises every form of Discord mention so user-supplied content can never
+    ping @everyone, a role, or an arbitrary user when surfaced through the bot.
+    Use this for any embed description / message body that interpolates raw user
+    input (e.g. /confess, /hotornot, /poll).
+    """
+    if not text:
+        return ""
+    text = str(text)
+
+    def _break(match: re.Match) -> str:
+        token = match.group(0)
+        # Replace the leading @ or < with a version that contains a zero-width
+        # space — Discord will display it but will NOT trigger a notification.
+        if token.startswith("@"):
+            return "@\u200b" + token[1:]
+        return "<\u200b" + token[1:]
+
+    return _MENTION_RE.sub(_break, text)
 
 
 def sanitize_for_prompt(text: str) -> str:
@@ -80,27 +152,28 @@ async def get_image_from_url(url: str) -> Optional[Image.Image]:
 
     Returns a PIL Image on success, None if the download fails, the URL
     returns a non-200 status, or the payload exceeds MAX_IMAGE_BYTES.
+    Uses the process-wide shared aiohttp session.
     """
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
+        session = get_session()
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                return None
+
+            # Reject oversized payloads before streaming
+            content_length = resp.headers.get("Content-Length")
+            if content_length and int(content_length) > MAX_IMAGE_BYTES:
+                log.warning("Image rejected: Content-Length %s exceeds limit.", content_length)
+                return None
+
+            data = bytearray()
+            async for chunk in resp.content.iter_chunked(1024):
+                data.extend(chunk)
+                if len(data) > MAX_IMAGE_BYTES:
+                    log.warning("Image rejected: streamed size exceeded %d bytes.", MAX_IMAGE_BYTES)
                     return None
 
-                # Reject oversized payloads before streaming
-                content_length = resp.headers.get("Content-Length")
-                if content_length and int(content_length) > MAX_IMAGE_BYTES:
-                    log.warning("Image rejected: Content-Length %s exceeds limit.", content_length)
-                    return None
-
-                data = bytearray()
-                async for chunk in resp.content.iter_chunked(1024):
-                    data.extend(chunk)
-                    if len(data) > MAX_IMAGE_BYTES:
-                        log.warning("Image rejected: streamed size exceeded %d bytes.", MAX_IMAGE_BYTES)
-                        return None
-
-                return Image.open(io.BytesIO(data))
+            return Image.open(io.BytesIO(data))
 
     except Exception as e:
         log.warning("Image download error from %s: %s", url, e)
@@ -294,16 +367,31 @@ async def send_chunked_reply(
             log.warning("send_chunked_reply failed on chunk %d: %s", i, e)
 
 
-def get_user_dossier(member: discord.Member) -> str:
-    """Build a short text profile of *member* for use in AI prompts."""
-    now         = datetime.datetime.utcnow()
-    created_at  = member.created_at.replace(tzinfo=None)
+def get_user_dossier(member: discord.Member, include_presence: bool = True) -> str:
+    """Build a short text profile of *member* for use in AI prompts.
+
+    When *include_presence* is False, rich-presence details (Spotify, games,
+    custom status) are omitted — used when a user has opted out via /privacy.
+    """
+    now         = utcnow()
+    # member.created_at is timezone-aware (UTC) from discord.py
+    created_at  = member.created_at if member.created_at.tzinfo else member.created_at.replace(tzinfo=UTC)
     age_days    = (now - created_at).days
     years       = age_days // 365
 
     roles     = [r.name for r in member.roles if r.name != "@everyone"]
     roles_str = sanitize_for_prompt(", ".join(roles) if roles else "No Roles")
-    status    = str(member.status).upper()
+
+    if not include_presence:
+        return (
+            f"METADATA (Use ONLY if funny):\n"
+            f"- Name: {sanitize_for_prompt(member.display_name)}\n"
+            f"- Account Age: {years} year(s), {age_days % 365} day(s) old.\n"
+            f"- Roles: {roles_str}\n"
+            f"- Status: (hidden by user privacy opt-out)\n"
+        )
+
+    status = str(member.status).upper()
 
     activity = "None"
     if member.activity:
@@ -352,7 +440,11 @@ async def get_user_history_text(
         content = doc.get("parts", [""])[0]
         role    = doc.get("role", "user")
         label   = "Yuri" if role == "model" else "User"
-        if isinstance(content, str) and len(content) < 200:
+        if isinstance(content, str) and content.strip():
+            # Truncate over-long messages instead of dropping them entirely —
+            # a long message often carries the most context.
+            if len(content) > HISTORY_MSG_MAX:
+                content = content[:HISTORY_MSG_MAX] + "…"
             messages.append(f"{label}: {sanitize_for_prompt(content)}")
 
     if not messages:

@@ -29,8 +29,8 @@ class TestUtils(unittest.IsolatedAsyncioTestCase):
         time_str = utils.get_smart_time(default_text)
         self.assertIn("(IST)", time_str)
 
-    @patch('aiohttp.ClientSession.get')
-    async def test_get_image_from_url_success(self, mock_get):
+    @patch('utils.get_session')
+    async def test_get_image_from_url_success(self, mock_get_session):
         # Create a valid image in memory
         img = Image.new('RGB', (100, 100), color='red')
         img_byte_arr = io.BytesIO()
@@ -49,32 +49,36 @@ class TestUtils(unittest.IsolatedAsyncioTestCase):
         mock_resp.content.iter_chunked = iter_chunked
 
         # Setup context manager mock
+        mock_session = MagicMock()
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__.return_value = mock_resp
         mock_ctx.__aexit__.return_value = None
-        mock_get.return_value = mock_ctx
+        mock_session.get.return_value = mock_ctx
+        mock_get_session.return_value = mock_session
 
         result = await utils.get_image_from_url("http://example.com/image.jpg")
         self.assertIsNotNone(result)
         self.assertIsInstance(result, Image.Image)
 
-    @patch('aiohttp.ClientSession.get')
-    async def test_get_image_from_url_too_large_header(self, mock_get):
+    @patch('utils.get_session')
+    async def test_get_image_from_url_too_large_header(self, mock_get_session):
         # Mock response with large content length
         mock_resp = AsyncMock()
         mock_resp.status = 200
         mock_resp.headers = {'Content-Length': str(9 * 1024 * 1024)} # 9MB
 
+        mock_session = MagicMock()
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__.return_value = mock_resp
         mock_ctx.__aexit__.return_value = None
-        mock_get.return_value = mock_ctx
+        mock_session.get.return_value = mock_ctx
+        mock_get_session.return_value = mock_session
 
         result = await utils.get_image_from_url("http://example.com/large.jpg")
         self.assertIsNone(result)
 
-    @patch('aiohttp.ClientSession.get')
-    async def test_get_image_from_url_too_large_stream(self, mock_get):
+    @patch('utils.get_session')
+    async def test_get_image_from_url_too_large_stream(self, mock_get_session):
         # Mock response with valid header but large stream
         mock_resp = AsyncMock()
         mock_resp.status = 200
@@ -85,10 +89,12 @@ class TestUtils(unittest.IsolatedAsyncioTestCase):
             yield b'a' * (9 * 1024 * 1024)
         mock_resp.content.iter_chunked = iter_chunked
 
+        mock_session = MagicMock()
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__.return_value = mock_resp
         mock_ctx.__aexit__.return_value = None
-        mock_get.return_value = mock_ctx
+        mock_session.get.return_value = mock_ctx
+        mock_get_session.return_value = mock_session
 
         result = await utils.get_image_from_url("http://example.com/stream.jpg")
         self.assertIsNone(result)

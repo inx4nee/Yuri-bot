@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff black pytest pytest-asyncio pytest-cov
+
+      - name: Lint with ruff
+        run: ruff check . --output-format=github
+
+      - name: Check formatting with black
+        run: black --check --diff .
+
+      - name: Run tests
+        env:
+          # Tests don't need real credentials — all I/O is mocked. But main.py's
+          # pre-flight checks require the env vars to exist, so set dummies.
+          DISCORD_TOKEN: dummy
+          MONGO_URL: mongodb://dummy
+          OWNER_ID: "123456"
+          GEMINI_API_KEY: dummy
+        run: pytest tests/ -v --tb=short
+
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: .coverage
+          retention-days: 7
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    # Only build the Docker image on the main branch or on tags
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: yuri-bot:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

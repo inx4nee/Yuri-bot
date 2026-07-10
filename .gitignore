@@ -1,5 +1,30 @@
 .env
+.env.local
+.env.*.local
 __pycache__/
 *.pyc
+*.pyo
 venv/
+.venv/
 .DS_Store
+
+# Test / coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+*.log
+logs/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/

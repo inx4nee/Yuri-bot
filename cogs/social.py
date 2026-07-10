@@ -1,5 +1,5 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 
 import asyncio
@@ -12,12 +12,109 @@ import utils
 log = logging.getLogger(__name__)
 
 
+# Cooldowns: prevent spam flooding of public-channel commands.
+# 1 use per 5 minutes per user, with a 2-per-guild burst limit.
+CONFESS_COOLDOWN_SECS    = 300   # 5 minutes
+HOTORNOT_COOLDOWN_SECS   = 600   # 10 minutes
+HOTORNOT_VERDICT_DELAY   = 900   # 15 minutes
+
+
 class Social(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        # Start the pending-verdict sweep loop (survives bot restarts because
+        # pending verdicts are persisted in MongoDB, not in-memory).
+        self._verdict_sweep.start()
+
+    def cog_unload(self) -> None:
+        self._verdict_sweep.cancel()
 
     async def get_ai_cog(self):
         return self.bot.get_cog("AI")
+
+    async def _include_presence(self, user_id: int) -> bool:
+        """Check the user's privacy preference. Returns True if presence data is allowed.
+
+        Defaults to True (opt-in to opt-OUT) to preserve existing behavior.
+        """
+        doc = await self.bot.privacy_collection.find_one({"user_id": user_id})
+        if doc is None:
+            return True
+        return bool(doc.get("include_presence", True))
+
+    @tasks.loop(seconds=60)
+    async def _verdict_sweep(self) -> None:
+        """Every 60s, deliver any hotornot verdicts whose deliver_at has passed.
+
+        Replaces the previous in-memory asyncio.sleep(900) approach, which would
+        silently drop the verdict if the bot restarted during the 15-minute wait.
+        """
+        try:
+            now = utils.utcnow()
+            cursor = self.bot.pending_verdicts_col.find({"deliver_at": {"$lte": now}})
+            async for doc in cursor:
+                await self._deliver_hotornot_verdict(doc)
+                await self.bot.pending_verdicts_col.delete_one({"_id": doc["_id"]})
+        except Exception as e:
+            log.warning("verdict sweep error: %s", e)
+
+    @_verdict_sweep.before_loop
+    async def _before_verdict_sweep(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _deliver_hotornot_verdict(self, doc: dict) -> None:
+        """Fetch vote tallies for a persisted hotornot submission and post the verdict."""
+        channel = self.bot.get_channel(doc["channel_id"])
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(doc["channel_id"])
+            except discord.NotFound:
+                log.warning("hotornot: channel %s no longer exists.", doc["channel_id"])
+                return
+
+        try:
+            vote_msg = await channel.fetch_message(doc["vote_msg_id"])
+        except discord.NotFound:
+            log.warning("hotornot: vote message %s was deleted before verdict.", doc["vote_msg_id"])
+            return
+        except discord.Forbidden:
+            log.warning("hotornot: bot lacks permission to read vote message %s.", doc["vote_msg_id"])
+            return
+
+        hot_count = 0
+        not_count = 0
+        for reaction in vote_msg.reactions:
+            if str(reaction.emoji) == "🔥":
+                hot_count = reaction.count - 1
+            elif str(reaction.emoji) == "💀":
+                not_count = reaction.count - 1
+
+        ai = await self.get_ai_cog()
+        if ai is None:
+            log.warning("hotornot: AI cog not loaded; skipping verdict.")
+            return
+
+        verdict_prompt = (
+            f"A hotornot vote just ended. Someone described themselves as: '{doc['safe_desc']}'. "
+            f"Results: {hot_count} voted 🔥 hot, {not_count} voted 💀 not. "
+            f"Deliver the verdict dramatically as Yuri. Be funny and ruthless."
+        )
+        verdict, _ = await ai.get_combined_response(
+            doc["user_id"], None, prompt_override=verdict_prompt
+        )
+
+        # Sanitize model output before posting to a public channel.
+        public_verdict = utils.sanitize_for_discord(verdict)
+
+        result_embed = discord.Embed(
+            title="⚖️ THE VERDICT IS IN",
+            description=f"🔥 **{hot_count}** vs 💀 **{not_count}**\n\n{public_verdict}",
+            color=discord.Color.green() if hot_count >= not_count else discord.Color.red(),
+        )
+        try:
+            await channel.send(embed=result_embed)
+        except discord.Forbidden:
+            log.warning("hotornot: bot lacks permission to post verdict in channel %s.", channel.id)
 
     # --- /roast ---
 
@@ -31,7 +128,8 @@ class Social(commands.Cog):
 
         await interaction.response.defer()
 
-        dossier = utils.get_user_dossier(member)
+        include_presence = await self._include_presence(member.id)
+        dossier = utils.get_user_dossier(member, include_presence=include_presence)
         history = await utils.get_user_history_text(self.bot.chat_collection, member.id)
         pfp     = (
             await utils.get_image_from_url(member.display_avatar.url)
@@ -63,7 +161,8 @@ class Social(commands.Cog):
 
         await interaction.response.defer()
 
-        dossier = utils.get_user_dossier(member)
+        include_presence = await self._include_presence(member.id)
+        dossier = utils.get_user_dossier(member, include_presence=include_presence)
         history = await utils.get_user_history_text(self.bot.chat_collection, member.id)
         pfp     = (
             await utils.get_image_from_url(member.display_avatar.url)
@@ -106,8 +205,8 @@ class Social(commands.Cog):
             await interaction.followup.send("shipping yourself?? bro please 💀")
             return
 
-        d1 = utils.get_user_dossier(member1)
-        d2 = utils.get_user_dossier(target2)
+        d1 = utils.get_user_dossier(member1, include_presence=await self._include_presence(member1.id))
+        d2 = utils.get_user_dossier(target2, include_presence=await self._include_presence(target2.id))
         h1 = await utils.get_user_history_text(self.bot.chat_collection, member1.id, limit=30)
         h2 = await utils.get_user_history_text(self.bot.chat_collection, target2.id, limit=30)
 
@@ -152,6 +251,7 @@ class Social(commands.Cog):
     # --- /confess ---
 
     @app_commands.command(name="confess", description="Send an anonymous confession.")
+    @app_commands.checks.cooldown(1, CONFESS_COOLDOWN_SECS)
     async def confess(self, interaction: discord.Interaction, message: str) -> None:
         # DM guard.
         if not interaction.guild:
@@ -173,9 +273,14 @@ class Social(commands.Cog):
             config["confession_channel_id"]
         ) or await interaction.guild.fetch_channel(config["confession_channel_id"])
 
+        # CRITICAL: sanitize the raw user input before embedding so it can't ping
+        # @everyone, a role, or an arbitrary user. This is the fix for the
+        # mention-injection bug where /confess could be abused to mass-ping.
+        safe_message = utils.sanitize_for_discord(message)
+
         embed = discord.Embed(
             title="📨 Anonymous Confession",
-            description=f'"{message}"',
+            description=f'"{safe_message}"',
             color=discord.Color.random(),
         )
         embed.set_footer(text="Sent via /confess • Identity Hidden")
@@ -223,7 +328,7 @@ class Social(commands.Cog):
         else:
             await self.bot.crush_collection.update_one(
                 {"lover_id": interaction.user.id, "target_id": target.id},
-                {"$set": {"timestamp": datetime.datetime.utcnow()}},
+                {"$set": {"timestamp": utils.utcnow()}},
                 upsert=True,
             )
             await interaction.followup.send("🤫 **Secret Kept.**", ephemeral=True)
@@ -306,6 +411,7 @@ class Social(commands.Cog):
         name="hotornot",
         description="Submit an anonymous description and let the server judge you.",
     )
+    @app_commands.checks.cooldown(1, HOTORNOT_COOLDOWN_SECS)
     async def hotornot(self, interaction: discord.Interaction, description: str) -> None:
         # DM guard.
         if not interaction.guild:
@@ -336,9 +442,17 @@ class Social(commands.Cog):
             interaction.user.id, None, prompt_override=intro_prompt
         )
 
+        # CRITICAL: use sanitize_for_discord on the raw user-supplied description
+        # before it goes into the public embed. The original bug used the raw
+        # `description` here, allowing @everyone / role pings.
+        public_desc = utils.sanitize_for_discord(description)
+        # yuri_intro comes from the model — sanitize it too just in case the model
+        # echoes back something pingable.
+        public_intro = utils.sanitize_for_discord(yuri_intro)
+
         embed = discord.Embed(
             title="🚨 ANONYMOUS SUBMISSION 🚨",
-            description=f'**Case:**\n*"{description}"*\n\n**Yuri says:** {yuri_intro}',
+            description=f'**Case:**\n*"{public_desc}"*\n\n**Yuri says:** {public_intro}',
             color=discord.Color.from_rgb(255, 105, 180),
         )
         embed.set_footer(text="🔥 = Hot   💀 = Not  |  Verdict in 15 minutes")
@@ -350,59 +464,19 @@ class Social(commands.Cog):
             "✅ submitted anonymously. good luck bestie 💀", ephemeral=True
         )
 
-        self.bot.loop.create_task(
-            self._deliver_hotornot_verdict(
-                channel=channel,
-                vote_msg_id=vote_msg.id,
-                safe_desc=safe_desc,
-                user_id=interaction.user.id,
-            )
-        )
-
-    async def _deliver_hotornot_verdict(
-        self,
-        channel:     discord.TextChannel,
-        vote_msg_id: int,
-        safe_desc:   str,
-        user_id:     int,
-    ) -> None:
-        """Background task: wait 15 minutes then post the hotornot verdict.
-
-        Separated from the slash-command handler so no coroutine is held open
-        for 15 minutes (FIX CRITICAL from the first pass).
-        """
-        await asyncio.sleep(900)  # 15 minutes
-
-        try:
-            vote_msg = await channel.fetch_message(vote_msg_id)
-        except discord.NotFound:
-            log.warning("hotornot: vote message %d was deleted before verdict.", vote_msg_id)
-            return
-
-        hot_count = 0
-        not_count = 0
-        for reaction in vote_msg.reactions:
-            if str(reaction.emoji) == "🔥":
-                hot_count = reaction.count - 1
-            elif str(reaction.emoji) == "💀":
-                not_count = reaction.count - 1
-
-        ai = await self.get_ai_cog()
-        verdict_prompt = (
-            f"A hotornot vote just ended. Someone described themselves as: '{safe_desc}'. "
-            f"Results: {hot_count} voted 🔥 hot, {not_count} voted 💀 not. "
-            f"Deliver the verdict dramatically as Yuri. Be funny and ruthless."
-        )
-        verdict, _ = await ai.get_combined_response(
-            user_id, None, prompt_override=verdict_prompt
-        )
-
-        result_embed = discord.Embed(
-            title="⚖️ THE VERDICT IS IN",
-            description=f"🔥 **{hot_count}** vs 💀 **{not_count}**\n\n{verdict}",
-            color=discord.Color.green() if hot_count >= not_count else discord.Color.red(),
-        )
-        await channel.send(embed=result_embed)
+        # Persist the pending verdict so a bot restart doesn't silently drop it.
+        # A periodic sweep task (started in General cog / setup_hook) will pick it
+        # up after HOTORNOT_VERDICT_DELAY seconds and post the verdict.
+        deliver_at = utils.utcnow() + datetime.timedelta(seconds=HOTORNOT_VERDICT_DELAY)
+        await self.bot.pending_verdicts_col.insert_one({
+            "channel_id":  channel.id,
+            "guild_id":    interaction.guild_id,
+            "vote_msg_id": vote_msg.id,
+            "safe_desc":   safe_desc,
+            "user_id":     interaction.user.id,
+            "deliver_at":  deliver_at,
+            "created_at":  utils.utcnow(),
+        })
 
     # --- /summarize ---
 
@@ -475,8 +549,8 @@ class Social(commands.Cog):
             await interaction.followup.send("bro is trying to ship themselves 💀 seek help")
             return
 
-        d1 = utils.get_user_dossier(member1)
-        d2 = utils.get_user_dossier(target2)
+        d1 = utils.get_user_dossier(member1, include_presence=await self._include_presence(member1.id))
+        d2 = utils.get_user_dossier(target2, include_presence=await self._include_presence(target2.id))
         h1 = await utils.get_user_history_text(self.bot.chat_collection, member1.id, limit=30)
         h2 = await utils.get_user_history_text(self.bot.chat_collection, target2.id, limit=30)
         
